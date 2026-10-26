@@ -176,6 +176,9 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-26 | T001 | `.env.example` sets `DATABASE_URL` host to `localhost`, not `db` as in spec §10 example | Backend dev and integration tests run on the host against the published `127.0.0.1:5432`; the api container will set host `db` when that service is added |
 | 2026-10-26 | T002 | HttpExceptions with a 4xx status other than 400/401/403/404 (e.g. 413 payload too large) keep their status and use `VALIDATION_ERROR` | `ErrorCode` has no generic client-error code; the request itself is unacceptable, matching the 400 "malformed request" meaning |
 | 2026-10-26 | T002 | P2002 is mapped when `meta.target` equals the constraint name or its column list | Prisma reports either form depending on the index; the integration tests in T007/T010/T027 confirm the real value |
+| 2026-10-26 | T003 | Host-side Prisma CLI and backend read a git-ignored `backend/.env` (copy of root `.env` with `localhost` DB host); root `.env` stays for Docker Compose | Prisma only loads `.env` from the backend project folder, not the repo root; no extra dotenv dependency |
+| 2026-10-26 | T003 | Unique keys are Prisma unique indexes (`products_sku_key`, `ri_document_product_uq`, …) rather than inline `UNIQUE` constraints as written in §3.2 | Prisma always emits unique indexes; names, enforcement and the P2002/23505 error are identical. Verified by diffing `pg_dump` of the migration against the §3.2 DDL: only this and `now()`≡`CURRENT_TIMESTAMP` differ |
+| 2026-10-26 | T003 | Seed upserts never update existing rows (`update: {}`); changing `SEED_*_PASSWORD` does not re-hash an existing user | Spec only requires no duplicates; leaving rows untouched is the simplest idempotent behaviour |
 
 ## 9. References
 

@@ -1,0 +1,192 @@
+// Mirrors technical-spec §3.2. CHECK constraints, lower() indexes, the document
+// number sequence and pgcrypto are hand-added in the init migration (spec §3.3).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OPERATOR
+  SUPERVISOR
+
+  @@map("user_role")
+}
+
+enum ReceivingStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CLOSED_SHORT
+  CANCELLED
+
+  @@map("receiving_status")
+}
+
+enum InventoryTransactionType {
+  RECEIPT
+  RECEIPT_REVERSAL
+
+  @@map("inventory_transaction_type")
+}
+
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username     String   @unique @db.VarChar(50)
+  passwordHash String   @map("password_hash") @db.VarChar(100)
+  fullName     String   @map("full_name") @db.VarChar(100)
+  role         UserRole
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  createdDocuments      ReceivingDocument[]    @relation("DocumentCreatedBy")
+  openedDocuments       ReceivingDocument[]    @relation("DocumentOpenedBy")
+  completedDocuments    ReceivingDocument[]    @relation("DocumentCompletedBy")
+  closedShortDocuments  ReceivingDocument[]    @relation("DocumentClosedShortBy")
+  cancelledDocuments    ReceivingDocument[]    @relation("DocumentCancelledBy")
+  receipts              Receipt[]
+  receiptReversals      ReceiptReversal[]
+  inventoryTransactions InventoryTransaction[]
+
+  @@map("users")
+}
+
+model Product {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sku           String   @unique @db.VarChar(50)
+  name          String   @db.VarChar(200)
+  unitOfMeasure String   @map("unit_of_measure") @db.VarChar(20)
+  description   String?  @db.VarChar(1000)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  inventoryBalance      InventoryBalance?
+  receivingItems        ReceivingItem[]
+  inventoryTransactions InventoryTransaction[]
+
+  @@index([createdAt(sort: Desc)], map: "products_created_at_idx")
+  @@map("products")
+}
+
+model ReceivingDocument {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentNumber   String          @unique @map("document_number") @db.VarChar(20)
+  supplierName     String          @map("supplier_name") @db.VarChar(200)
+  referenceNumber  String?         @map("reference_number") @db.VarChar(100)
+  expectedDate     DateTime?       @map("expected_date") @db.Date
+  notes            String?         @db.VarChar(1000)
+  status           ReceivingStatus @default(DRAFT)
+  createdById      String          @map("created_by_id") @db.Uuid
+  openedAt         DateTime?       @map("opened_at") @db.Timestamptz
+  openedById       String?         @map("opened_by_id") @db.Uuid
+  completedAt      DateTime?       @map("completed_at") @db.Timestamptz
+  completedById    String?         @map("completed_by_id") @db.Uuid
+  closedShortAt    DateTime?       @map("closed_short_at") @db.Timestamptz
+  closedShortById  String?         @map("closed_short_by_id") @db.Uuid
+  closeShortReason String?         @map("close_short_reason") @db.VarChar(500)
+  cancelledAt      DateTime?       @map("cancelled_at") @db.Timestamptz
+  cancelledById    String?         @map("cancelled_by_id") @db.Uuid
+  cancelReason     String?         @map("cancel_reason") @db.VarChar(500)
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdBy     User  @relation("DocumentCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  openedBy      User? @relation("DocumentOpenedBy", fields: [openedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  completedBy   User? @relation("DocumentCompletedBy", fields: [completedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  closedShortBy User? @relation("DocumentClosedShortBy", fields: [closedShortById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cancelledBy   User? @relation("DocumentCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  items                 ReceivingItem[]
+  inventoryTransactions InventoryTransaction[]
+
+  @@index([status, createdAt(sort: Desc)], map: "rd_status_created_idx")
+  @@index([createdAt(sort: Desc)], map: "rd_created_at_idx")
+  @@map("receiving_documents")
+}
+
+model ReceivingItem {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  receivingDocumentId String   @map("receiving_document_id") @db.Uuid
+  productId           String   @map("product_id") @db.Uuid
+  expectedQuantity    Int      @map("expected_quantity")
+  receivedQuantity    Int      @default(0) @map("received_quantity")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  receivingDocument ReceivingDocument @relation(fields: [receivingDocumentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  product           Product           @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  receipts          Receipt[]
+
+  @@unique([receivingDocumentId, productId], map: "ri_document_product_uq")
+  @@index([productId], map: "ri_product_idx")
+  @@map("receiving_items")
+}
+
+model Receipt {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  receivingItemId String   @map("receiving_item_id") @db.Uuid
+  quantity        Int
+  idempotencyKey  String   @unique @map("idempotency_key") @db.VarChar(100)
+  receivedById    String   @map("received_by_id") @db.Uuid
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz
+
+  receivingItem        ReceivingItem         @relation(fields: [receivingItemId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  receivedBy           User                  @relation(fields: [receivedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reversal             ReceiptReversal?
+  inventoryTransaction InventoryTransaction?
+
+  @@index([receivingItemId, receivedAt], map: "receipts_item_idx")
+  @@map("receipts")
+}
+
+model ReceiptReversal {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  receiptId    String   @unique @map("receipt_id") @db.Uuid
+  reason       String   @db.VarChar(500)
+  reversedById String   @map("reversed_by_id") @db.Uuid
+  reversedAt   DateTime @default(now()) @map("reversed_at") @db.Timestamptz
+
+  receipt              Receipt               @relation(fields: [receiptId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reversedBy           User                  @relation(fields: [reversedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  inventoryTransaction InventoryTransaction?
+
+  @@map("receipt_reversals")
+}
+
+model InventoryBalance {
+  productId      String   @id @map("product_id") @db.Uuid
+  quantityOnHand Int      @default(0) @map("quantity_on_hand")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@map("inventory_balances")
+}
+
+model InventoryTransaction {
+  id                  BigInt                   @id @default(autoincrement())
+  productId           String                   @map("product_id") @db.Uuid
+  type                InventoryTransactionType
+  quantityChange      Int                      @map("quantity_change")
+  balanceAfter        Int                      @map("balance_after")
+  receiptId           String?                  @unique @map("receipt_id") @db.Uuid
+  receiptReversalId   String?                  @unique @map("receipt_reversal_id") @db.Uuid
+  receivingDocumentId String?                  @map("receiving_document_id") @db.Uuid
+  createdById         String                   @map("created_by_id") @db.Uuid
+  createdAt           DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+
+  product           Product            @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  receipt           Receipt?           @relation(fields: [receiptId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  receiptReversal   ReceiptReversal?   @relation(fields: [receiptReversalId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  receivingDocument ReceivingDocument? @relation(fields: [receivingDocumentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  createdBy         User               @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([productId, id(sort: Desc)], map: "it_product_created_idx")
+  @@index([receivingDocumentId], map: "it_document_idx")
+  @@index([createdAt(sort: Desc)], map: "it_created_at_idx")
+  @@map("inventory_transactions")
+}

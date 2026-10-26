@@ -35,7 +35,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- errors`
 - **Done when:** every error leaves the API in the spec §4.2 shape; config errors stop startup with a clear message.
 
-### [ ] T003 Database schema, migration and seed
+### [x] T003 Database schema, migration and seed
 - **Refs:** technical-spec §2, §3 (all); prd BR-01, BR-12, BR-13
 - **Depends:** T001
 - **Work:** `prisma/schema.prisma` matching DDL §3.2 exactly (names via `@@map`/`@map`, enums, lengths, `Timestamptz`, unique and composite unique, indexes). Generate the `init` migration with `--create-only`, then append every CHECK constraint, the `lower()` indexes, the sequence and `pgcrypto` exactly as in §3.2. `prisma/seed.ts` per §3.4 using upserts, reading passwords from env and failing if unset. `PrismaService` module.
