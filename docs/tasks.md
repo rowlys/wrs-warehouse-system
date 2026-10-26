@@ -27,7 +27,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 
 ## Phase 1 — Backend foundation
 
-### [ ] T002 Config, global pipes and error envelope
+### [x] T002 Config, global pipes and error envelope
 - **Refs:** technical-spec §4.2, §4.3, §10, §12; openapi `components.schemas.ErrorResponse`, `ErrorCode`
 - **Depends:** T001
 - **Work:** typed config module that validates env vars at startup (fails fast if `DATABASE_URL` missing or `JWT_SECRET` < 32 chars); global prefix `/api/v1` (excluding `/health`); global `ValidationPipe` (`whitelist`, `forbidNonWhitelisted`, `transform`) whose errors become `VALIDATION_ERROR` with `details.fields[]`; `ErrorCode` enum; `AppError(code, httpStatus, message, details?)`; global exception filter producing the envelope for AppError, HttpException, Prisma known errors (spec §4.3 mapping) and unknown errors (500 `INTERNAL_ERROR`, logged with stack). Request logging middleware (method, path, status, ms; never bodies).

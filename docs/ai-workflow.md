@@ -174,6 +174,7 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | Date | Task | Decision | Reason |
 |---|---|---|---|
 | 2026-10-26 | T001 | `.env.example` sets `DATABASE_URL` host to `localhost`, not `db` as in spec §10 example | Backend dev and integration tests run on the host against the published `127.0.0.1:5432`; the api container will set host `db` when that service is added |
+| 2026-10-26 | T002 | HttpExceptions with a 4xx status other than 400/401/403/404 (e.g. 413 payload too large) keep their status and use `VALIDATION_ERROR` | `ErrorCode` has no generic client-error code; the request itself is unacceptable, matching the 400 "malformed request" meaning || 2026-10-26 | T002 | P2002 is mapped when `meta.target` equals the constraint name or its column list | Prisma reports either form depending on the index; the integration tests in T007/T010/T027 confirm the real value |
 
 ## 9. References
 
