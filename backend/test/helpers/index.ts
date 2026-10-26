@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, Type } from '@nestjs/common';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { PrismaClient, User, UserRole } from '@prisma/client';
@@ -16,13 +16,15 @@ const next = () => String(++seq).padStart(4, '0');
 
 /**
  * Real Nest app with the same global prefix, pipes, filter and logging as main.ts.
- * `customize` can override providers, e.g. to simulate a database failure.
+ * `customize` can override providers, e.g. to simulate a database failure;
+ * `controllers` mounts test-only routes.
  */
 export async function createTestApp(
   customize: (builder: TestingModuleBuilder) => TestingModuleBuilder = (b) => b,
+  controllers: Type[] = [],
 ): Promise<INestApplication<App>> {
   const moduleRef = await customize(
-    Test.createTestingModule({ imports: [AppModule] }),
+    Test.createTestingModule({ imports: [AppModule], controllers }),
   ).compile();
   const app = moduleRef.createNestApplication<INestApplication<App>>({
     logger: false,

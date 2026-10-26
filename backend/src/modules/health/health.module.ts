@@ -7,7 +7,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { Public } from '../../common/auth/public.decorator';
+import { Public } from '../../common/auth/auth.decorators';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface HealthResponse {

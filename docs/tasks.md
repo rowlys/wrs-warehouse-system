@@ -59,7 +59,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- health`
 - **Done when:** both cases pass; endpoint needs no token.
 
-### [ ] T006 Authentication and role-based authorization
+### [x] T006 Authentication and role-based authorization
 - **Refs:** prd FR-01–FR-05, US-01, NFR-02; technical-spec §8; openapi `/auth/*`
 - **Depends:** T004
 - **Work:** `POST /auth/login` (bcrypt compare, same 401 `INVALID_CREDENTIALS` for unknown user and wrong password), `GET /auth/me`; JWT with `sub`, `username`, `role`; global `JwtAuthGuard` with `@Public()` opt-out; `RolesGuard` + `@Roles()`; `@CurrentUser()` decorator.

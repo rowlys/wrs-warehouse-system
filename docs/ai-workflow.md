@@ -182,6 +182,7 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-26 | T004 | Jest global setup runs `prisma migrate deploy` on `wrs_test`, not `migrate reset --force --skip-seed` (spec §3.3.7); `truncateAll()` in `beforeEach` gives the clean state | Chosen by the candidate: Prisma blocks `migrate reset` when run by an AI agent; deploy is non-destructive and truncation already isolates tests. Harness refuses any database other than `wrs_test` |
 | 2026-10-26 | T004 | `loginAs(role)` signs a JWT with the spec §8 claims (`sub`, `username`, `role`) instead of calling `POST /auth/login`; factories write through Prisma | Login (T006) and document endpoints (T009/T011) do not exist yet; the real login flow is tested in T006 |
 | 2026-10-26 | T004 | Jest runs with `maxWorkers: 1` and `testTimeout: 20000` | All test files share one database and truncate it, so files must not run in parallel; the timeout gives app start-up headroom on a cold first run |
+| 2026-10-26 | T006 | `JwtAuthGuard` verifies tokens with `@nestjs/jwt` `JwtService` (HS256 pinned for sign and verify); `passport-jwt` from spec §0 is not used | Same behaviour with one library instead of four (`@nestjs/passport`, `passport`, `passport-jwt`, types); errors map straight to the envelope without a Passport strategy |
 
 ## 9. References
 
