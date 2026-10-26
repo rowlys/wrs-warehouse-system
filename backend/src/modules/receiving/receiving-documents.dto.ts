@@ -1,5 +1,5 @@
 import { ReceivingStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -35,6 +35,16 @@ export class UpdateReceivingItemRequest {
   @Min(1)
   @Max(1_000_000)
   expectedQuantity!: number;
+}
+
+/** Cancel, close short and reverse (BR-15, BR-17): trimmed, then 3–500 characters. */
+export class ReasonRequest {
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @Length(3, 500)
+  reason!: string;
 }
 
 // BR-04

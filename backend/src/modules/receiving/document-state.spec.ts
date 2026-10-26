@@ -62,7 +62,11 @@ describe('document-state', () => {
         thrown = e;
       }
       expect(thrown).toBeInstanceOf(AppError);
-      expect(thrown).toMatchObject({ code: error, httpStatus: 409 });
+      expect(thrown).toMatchObject({
+        code: error,
+        httpStatus: 409,
+        details: { currentStatus: status, action },
+      });
     },
   );
 

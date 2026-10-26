@@ -103,7 +103,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- receiving-items`
 - **Done when:** all pass.
 
-### [ ] T011 Open, complete and cancel
+### [x] T011 Open, complete and cancel
 - **Refs:** prd FR-27–FR-29, BR-11, BR-15, US-03 (AC-03.4, AC-03.5), US-05; technical-spec §6.1, §7
 - **Depends:** T010
 - **Work:** three POST action endpoints, each one transaction with document `FOR UPDATE`, using `document-state.ts`; record timestamps and actor; complete returns `details.incompleteItemIds` on 422.

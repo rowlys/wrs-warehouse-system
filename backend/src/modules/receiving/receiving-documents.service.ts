@@ -6,7 +6,7 @@ import { Page, pageArgs, paginate } from '../../common/pagination/pagination';
 import { PrismaService } from '../../prisma/prisma.service';
 import { lockDocument } from './document-lock';
 import { formatDocumentNumber } from './document-number';
-import { assertCan } from './document-state';
+import { assertCan, nextStatus } from './document-state';
 import {
   CreateReceivingDocumentRequest,
   ListReceivingDocumentsQuery,
@@ -168,6 +168,90 @@ export class ReceivingDocumentsService {
         where: { id: itemId, receivingDocumentId: documentId },
       });
       if (!count) throw itemNotFound();
+    });
+  }
+
+  /** FR-27, spec §6.1 "Open": needs at least one line (BR-11). */
+  open(documentId: string, userId: string): Promise<ReceivingDocumentDetail> {
+    return this.transition(
+      documentId,
+      'OPEN',
+      async (tx) => {
+        const lines = await tx.receivingItem.count({
+          where: { receivingDocumentId: documentId },
+        });
+        if (!lines) {
+          throw new AppError(
+            ErrorCode.DOCUMENT_HAS_NO_ITEMS,
+            422,
+            'A document needs at least one line before it can be opened.',
+          );
+        }
+      },
+      { openedAt: new Date(), openedById: userId },
+    );
+  }
+
+  /** FR-28, spec §6.1 "Complete": every line fully received (BR-11). */
+  complete(
+    documentId: string,
+    userId: string,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.transition(
+      documentId,
+      'COMPLETE',
+      async (tx) => {
+        const items = await tx.receivingItem.findMany({
+          where: { receivingDocumentId: documentId },
+          select: { id: true, expectedQuantity: true, receivedQuantity: true },
+        });
+        const incomplete = items.filter(
+          (i) => i.receivedQuantity < i.expectedQuantity,
+        );
+        if (incomplete.length) {
+          throw new AppError(
+            ErrorCode.ITEMS_NOT_FULLY_RECEIVED,
+            422,
+            `${incomplete.length} of ${items.length} items are not fully received.`,
+            { incompleteItemIds: incomplete.map((i) => i.id) },
+          );
+        }
+      },
+      { completedAt: new Date(), completedById: userId },
+    );
+  }
+
+  /** FR-29, spec §6.1 "Cancel": DRAFT or OPEN only (BR-15). */
+  cancel(
+    documentId: string,
+    userId: string,
+    reason: string,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.transition(documentId, 'CANCEL', () => Promise.resolve(), {
+      cancelledAt: new Date(),
+      cancelledById: userId,
+      cancelReason: reason,
+    });
+  }
+
+  /**
+   * One status change in one transaction: lock the document, check the state machine,
+   * run the action's own guard, then write the new status with its timestamp and actor.
+   */
+  private transition(
+    documentId: string,
+    action: 'OPEN' | 'COMPLETE' | 'CANCEL',
+    guard: (tx: Prisma.TransactionClient) => Promise<void>,
+    data: Prisma.ReceivingDocumentUncheckedUpdateInput,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.prisma.$transaction(async (tx) => {
+      const status = nextStatus(action, await lockDocument(tx, documentId));
+      await guard(tx);
+      await tx.receivingDocument.update({
+        where: { id: documentId },
+        data: { ...data, status },
+      });
+      return this.loadDetail(tx, documentId);
     });
   }
 

@@ -22,6 +22,7 @@ import {
   ListReceivingDocumentsQuery,
   ReceivingDocumentDetail,
   ReceivingDocumentSummary,
+  ReasonRequest,
   ReceivingItemInput,
   UpdateReceivingItemRequest,
 } from './receiving-documents.dto';
@@ -81,5 +82,36 @@ export class ReceivingDocumentsController {
     @Param('itemId', uuidParam('itemId')) itemId: string,
   ): Promise<void> {
     return this.documents.removeItem(documentId, itemId);
+  }
+
+  @Roles(UserRole.SUPERVISOR)
+  @Post(':documentId/open')
+  @HttpCode(200)
+  open(
+    @Param('documentId', uuidParam('documentId')) documentId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.documents.open(documentId, user.id);
+  }
+
+  @Roles(UserRole.SUPERVISOR)
+  @Post(':documentId/complete')
+  @HttpCode(200)
+  complete(
+    @Param('documentId', uuidParam('documentId')) documentId: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.documents.complete(documentId, user.id);
+  }
+
+  @Roles(UserRole.SUPERVISOR)
+  @Post(':documentId/cancel')
+  @HttpCode(200)
+  cancel(
+    @Param('documentId', uuidParam('documentId')) documentId: string,
+    @Body() body: ReasonRequest,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.documents.cancel(documentId, user.id, body.reason);
   }
 }

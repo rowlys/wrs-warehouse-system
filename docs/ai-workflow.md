@@ -190,6 +190,7 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-26 | T009 | Detail lines are ordered `created_at ASC, product SKU ASC`; receipts `received_at ASC, id ASC` | Lines created in one transaction share `created_at`; SKU gives a stable, readable order. Receipts "oldest first" per OpenAPI |
 | 2026-10-26 | T009 | Supplier name, reference and notes are stored as sent (not trimmed); a duplicate product in the create payload is rejected before insert, unknown products return `details.productIds` | BR-04 does not ask for trimming (BR-03/BR-15 say so explicitly where wanted); pre-checks give deterministic 409/422 instead of relying on a nested-write error |
 | 2026-10-26 | T010 | Adding, changing or removing a line does not touch the document row's `updated_at`; the line carries its own `updated_at` | Spec is silent; the document row is only locked, not written, which keeps line edits to the §6.1 steps |
+| 2026-10-27 | T011 | Both 409 status errors (`INVALID_STATUS_TRANSITION`, `INVALID_DOCUMENT_STATUS`) carry `details: {currentStatus, action}` | OpenAPI shows these details for `INVALID_STATUS_TRANSITION`; using the same shape for both keeps one rule in `assertCan` and gives the UI the current status either way |
 
 ## 9. References
 

@@ -34,6 +34,7 @@ export function assertCan(action: Action, status: ReceivingStatus): void {
     code,
     409,
     `Cannot ${action.toLowerCase().replace('_', ' ')} a document with status ${status}.`,
+    { currentStatus: status, action },
   );
 }
 
