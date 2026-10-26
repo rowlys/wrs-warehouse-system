@@ -17,7 +17,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 
 ## Phase 0 — Scaffolding
 
-### [ ] T001 Repository and project scaffolding
+### [x] T001 Repository and project scaffolding
 - **Refs:** technical-spec §0, §1.2, §1.3, §10, §12
 - **Depends:** —
 - **Work:** `.gitignore` (node_modules, dist, .env, coverage, playwright reports); `.env.example` with every variable from spec §10 and placeholder values; `docker-compose.yml` with the `db` service only (postgres:16-alpine, named volume, `pg_isready` healthcheck, port 5432 published for local dev) bound to `127.0.0.1:5432` for local dev, plus `docker/db-init/` script that also creates the `wrs_test` database; NestJS app in `backend/` (strict TS, ESLint, Prettier, Jest); Vite React TS app in `frontend/` (strict TS, ESLint, Vitest) with a dev proxy forwarding `/api` and `/health` to `http://localhost:3000`. Remove scaffold demo code.

@@ -173,7 +173,7 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 
 | Date | Task | Decision | Reason |
 |---|---|---|---|
-| | | | |
+| 2026-10-26 | T001 | `.env.example` sets `DATABASE_URL` host to `localhost`, not `db` as in spec §10 example | Backend dev and integration tests run on the host against the published `127.0.0.1:5432`; the api container will set host `db` when that service is added |
 
 ## 9. References
 
