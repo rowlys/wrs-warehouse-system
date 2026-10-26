@@ -79,7 +79,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- products`
 - **Done when:** responses match openapi `Product` exactly; all listed tests pass.
 
-### [ ] T008 Receiving document state machine (pure)
+### [x] T008 Receiving document state machine (pure)
 - **Refs:** prd §9, BR-11; technical-spec §7
 - **Depends:** T002
 - **Work:** `document-state.ts` with `assertCan(action, status)` and `nextStatus(action, status)`, including `CLOSE_SHORT`, `REVERSE` and `CLOSED_SHORT`.
