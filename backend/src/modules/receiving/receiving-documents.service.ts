@@ -4,12 +4,16 @@ import { AppError } from '../../common/errors/app-error';
 import { ErrorCode } from '../../common/errors/error-code';
 import { Page, pageArgs, paginate } from '../../common/pagination/pagination';
 import { PrismaService } from '../../prisma/prisma.service';
+import { lockDocument } from './document-lock';
 import { formatDocumentNumber } from './document-number';
+import { assertCan } from './document-state';
 import {
   CreateReceivingDocumentRequest,
   ListReceivingDocumentsQuery,
   ReceivingDocumentDetail,
   ReceivingDocumentSummary,
+  ReceivingItemInput,
+  UpdateReceivingItemRequest,
 } from './receiving-documents.dto';
 import {
   DETAIL_INCLUDE,
@@ -21,6 +25,13 @@ import {
 } from './receiving.mappers';
 
 type Db = PrismaService | Prisma.TransactionClient;
+
+const itemNotFound = () =>
+  new AppError(
+    ErrorCode.NOT_FOUND,
+    404,
+    'Line not found on this receiving document',
+  );
 
 @Injectable()
 export class ReceivingDocumentsService {
@@ -103,6 +114,60 @@ export class ReceivingDocumentsService {
         },
       });
       return this.loadDetail(tx, doc.id);
+    });
+  }
+
+  /** FR-24. A duplicate product hits ri_document_product_uq → 409 (BR-06). */
+  addItem(
+    documentId: string,
+    input: ReceivingItemInput,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.prisma.$transaction(async (tx) => {
+      assertCan('EDIT_ITEMS', await lockDocument(tx, documentId));
+      const product = await tx.product.findUnique({
+        where: { id: input.productId },
+        select: { id: true },
+      });
+      if (!product) {
+        throw new AppError(
+          ErrorCode.PRODUCT_NOT_FOUND,
+          422,
+          'Product does not exist.',
+          { productIds: [input.productId] },
+        );
+      }
+      await tx.receivingItem.create({
+        data: { receivingDocumentId: documentId, ...input },
+      });
+      return this.loadDetail(tx, documentId);
+    });
+  }
+
+  /** FR-25 */
+  updateItem(
+    documentId: string,
+    itemId: string,
+    input: UpdateReceivingItemRequest,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.prisma.$transaction(async (tx) => {
+      assertCan('EDIT_ITEMS', await lockDocument(tx, documentId));
+      const { count } = await tx.receivingItem.updateMany({
+        where: { id: itemId, receivingDocumentId: documentId },
+        data: { expectedQuantity: input.expectedQuantity },
+      });
+      if (!count) throw itemNotFound();
+      return this.loadDetail(tx, documentId);
+    });
+  }
+
+  /** FR-26 */
+  removeItem(documentId: string, itemId: string): Promise<void> {
+    return this.prisma.$transaction(async (tx) => {
+      assertCan('EDIT_ITEMS', await lockDocument(tx, documentId));
+      const { count } = await tx.receivingItem.deleteMany({
+        where: { id: itemId, receivingDocumentId: documentId },
+      });
+      if (!count) throw itemNotFound();
     });
   }
 

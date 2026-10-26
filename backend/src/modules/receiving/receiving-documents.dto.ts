@@ -29,6 +29,14 @@ export class ReceivingItemInput {
   expectedQuantity!: number;
 }
 
+export class UpdateReceivingItemRequest {
+  // BR-05
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  expectedQuantity!: number;
+}
+
 // BR-04
 export class CreateReceivingDocumentRequest {
   @IsString()

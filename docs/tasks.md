@@ -95,7 +95,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- receiving-documents`
 - **Done when:** response shapes match openapi `ReceivingDocumentSummary` / `ReceivingDocumentDetail`.
 
-### [ ] T010 Edit lines on draft documents
+### [x] T010 Edit lines on draft documents
 - **Refs:** prd FR-24–FR-26, BR-05, BR-06, BR-10, BR-16; technical-spec §6.1 (Add/change/remove line); openapi `/receiving-documents/{documentId}/items*`
 - **Depends:** T009
 - **Work:** add, change expected quantity, remove; each locks the document and requires `DRAFT`; item must belong to the document (else 404).
