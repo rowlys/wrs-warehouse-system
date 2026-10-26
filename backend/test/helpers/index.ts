@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { PrismaClient, User, UserRole } from '@prisma/client';
 import { hash } from 'bcrypt';
 import { App } from 'supertest/types';
@@ -14,11 +14,16 @@ export const TEST_PASSWORD = 'Password123!';
 let seq = 0;
 const next = () => String(++seq).padStart(4, '0');
 
-/** Real Nest app with the same global prefix, pipes, filter and logging as main.ts. */
-export async function createTestApp(): Promise<INestApplication<App>> {
-  const moduleRef = await Test.createTestingModule({
-    imports: [AppModule],
-  }).compile();
+/**
+ * Real Nest app with the same global prefix, pipes, filter and logging as main.ts.
+ * `customize` can override providers, e.g. to simulate a database failure.
+ */
+export async function createTestApp(
+  customize: (builder: TestingModuleBuilder) => TestingModuleBuilder = (b) => b,
+): Promise<INestApplication<App>> {
+  const moduleRef = await customize(
+    Test.createTestingModule({ imports: [AppModule] }),
+  ).compile();
   const app = moduleRef.createNestApplication<INestApplication<App>>({
     logger: false,
   });

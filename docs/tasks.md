@@ -51,7 +51,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- harness`
 - **Done when:** tests run against a real database, isolated per test via truncation, and finish in < 30 s.
 
-### [ ] T005 Health endpoint
+### [x] T005 Health endpoint
 - **Refs:** prd FR-50, US-07; technical-spec §4.1; openapi `/health`
 - **Depends:** T004
 - **Work:** `GET /health` (public, no prefix) running `SELECT 1`; 200 `{status:"ok",database:"up"}` or 503 `{status:"error",database:"down"}`.
