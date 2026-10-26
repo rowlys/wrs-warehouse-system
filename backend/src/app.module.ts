@@ -3,6 +3,7 @@ import { ConfigModule } from './config/config';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { ProductsModule } from './modules/products/products.module';
+import { ReceivingModule } from './modules/receiving/receiving.module';
 import { PrismaModule } from './prisma/prisma.service';
 
 @Module({
@@ -12,6 +13,7 @@ import { PrismaModule } from './prisma/prisma.service';
     AuthModule,
     HealthModule,
     ProductsModule,
+    ReceivingModule,
   ],
 })
 export class AppModule {}

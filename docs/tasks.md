@@ -87,7 +87,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- document-state`
 - **Done when:** 42/42 cases pass; no DB access in this file.
 
-### [ ] T009 Create, list and view receiving documents
+### [x] T009 Create, list and view receiving documents
 - **Refs:** prd FR-20–FR-23, BR-04–BR-06, BR-16, US-03 (AC-03.1–AC-03.3); technical-spec §4.4, §6.1 (Create document); openapi `/receiving-documents`, `/receiving-documents/{documentId}`
 - **Depends:** T007, T008
 - **Work:** create (SUPERVISOR) with optional lines in one transaction, number from sequence `RCV-YYYY-NNNNNN`; list with status filter, search, pagination, summary totals; detail with lines (remaining, isFullyReceived), `allItemsReceived`, receipts oldest first, actor refs.
