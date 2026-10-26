@@ -1,4 +1,4 @@
-import { ValidationError, ValidationPipe } from '@nestjs/common';
+import { ParseUUIDPipe, ValidationError, ValidationPipe } from '@nestjs/common';
 import { AppError } from './app-error';
 import { ErrorCode } from './error-code';
 
@@ -15,6 +15,16 @@ function flatten(errors: ValidationError[], prefix = ''): FieldError[] {
       message,
     }));
     return [...own, ...flatten(e.children ?? [], `${field}.`)];
+  });
+}
+
+/** Path-param UUID check that reports like body validation: `details.fields[{ field: name }]`. */
+export function uuidParam(name: string): ParseUUIDPipe {
+  return new ParseUUIDPipe({
+    exceptionFactory: () =>
+      new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Validation failed', {
+        fields: [{ field: name, message: `${name} must be a UUID` }],
+      }),
   });
 }
 

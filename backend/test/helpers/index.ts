@@ -43,9 +43,13 @@ export async function truncateAll(): Promise<void> {
   );
 }
 
+// Hashed once per test file; every test user shares TEST_PASSWORD.
+let passwordHash: Promise<string> | undefined;
+
 export function createUser(role: UserRole): Promise<User> {
   const n = next();
-  return hash(TEST_PASSWORD, 10).then((passwordHash) =>
+  passwordHash ??= hash(TEST_PASSWORD, 10);
+  return passwordHash.then((passwordHash) =>
     prisma.user.create({
       data: {
         username: `${role.toLowerCase()}-${n}`,

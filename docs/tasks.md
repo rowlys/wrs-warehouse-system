@@ -71,7 +71,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 
 ## Phase 2 — Backend business logic
 
-### [ ] T007 Products
+### [x] T007 Products
 - **Refs:** prd FR-10–FR-13, BR-01–BR-03, US-02; technical-spec §5 (Create product); openapi `/products*`, schemas `CreateProductRequest`, `Product`
 - **Depends:** T006
 - **Work:** list (pagination, search on SKU/name, newest first), get by id (with `quantityOnHand`), create (SUPERVISOR; trim + upper-case SKU; product + balance 0 in one transaction).

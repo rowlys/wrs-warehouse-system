@@ -183,6 +183,8 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-26 | T004 | `loginAs(role)` signs a JWT with the spec §8 claims (`sub`, `username`, `role`) instead of calling `POST /auth/login`; factories write through Prisma | Login (T006) and document endpoints (T009/T011) do not exist yet; the real login flow is tested in T006 |
 | 2026-10-26 | T004 | Jest runs with `maxWorkers: 1` and `testTimeout: 20000` | All test files share one database and truncate it, so files must not run in parallel; the timeout gives app start-up headroom on a cold first run |
 | 2026-10-26 | T006 | `JwtAuthGuard` verifies tokens with `@nestjs/jwt` `JwtService` (HS256 pinned for sign and verify); `passport-jwt` from spec §0 is not used | Same behaviour with one library instead of four (`@nestjs/passport`, `passport`, `passport-jwt`, types); errors map straight to the envelope without a Passport strategy |
+| 2026-10-26 | T007 | P2002 is matched by `meta.modelName` + column list (or constraint name); fixes the T002 mapping | Probed against real PostgreSQL: Prisma 6 reports `{modelName, target: [db columns]}`, never the constraint name. `receipt_id` is unique in both `receipt_reversals` and `inventory_transactions`, so columns alone would mislabel a ledger bug as 409 `RECEIPT_ALREADY_REVERSED` |
+| 2026-10-26 | T007 | Only SKU and product name are trimmed; unit of measure and description are stored as sent. Product lists sort `createdAt DESC, id DESC` | BR-01/BR-03 only require trimming SKU and name; the `id` tie-break keeps pages stable when timestamps are equal |
 
 ## 9. References
 
