@@ -37,6 +37,14 @@ export class UpdateReceivingItemRequest {
   expectedQuantity!: number;
 }
 
+export class RecordReceiptRequest {
+  // BR-07: whole number ≥ 1; the remaining-quantity check happens in the transaction.
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  quantity!: number;
+}
+
 /** Cancel, close short and reverse (BR-15, BR-17): trimmed, then 3–500 characters. */
 export class ReasonRequest {
   @Transform(({ value }: { value: unknown }) =>
@@ -150,4 +158,16 @@ export interface ReceivingDocumentDetail extends ReceivingDocumentSummary {
   cancelledBy: UserRef | null;
   cancelReason: string | null;
   updatedAt: Date;
+}
+
+export interface ReceiptResult {
+  receipt: Receipt;
+  item: ReceivingItem;
+  document: {
+    id: string;
+    documentNumber: string;
+    status: ReceivingStatus;
+    allItemsReceived: boolean;
+  };
+  inventory: { productId: string; quantityOnHand: number };
 }

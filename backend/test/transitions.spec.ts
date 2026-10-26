@@ -1,8 +1,10 @@
 import { INestApplication } from '@nestjs/common';
 import { Prisma, User, UserRole } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
+  assertInventoryConsistent,
   createDraftDocument,
   createProduct,
   createTestApp,
@@ -146,12 +148,68 @@ describe('document transitions: open, complete, cancel', () => {
   });
 
   describe('POST /complete', () => {
-    it.todo(
-      'AC-05.1 completes an IN_PROGRESS document whose lines are all fully received (needs receipts, T012)',
-    );
-    it.todo(
-      'AC-05.2 rejects completion with 422 ITEMS_NOT_FULLY_RECEIVED listing incomplete line ids (needs receipts, T012)',
-    );
+    const receive = (docId: string, itemId: string, quantity: number) =>
+      http()
+        .post(`/api/v1/receiving-documents/${docId}/items/${itemId}/receipts`)
+        .set('Authorization', `Bearer ${operator}`)
+        .set('Idempotency-Key', randomUUID())
+        .send({ quantity });
+
+    it('AC-05.1 FR-28 completes a fully received IN_PROGRESS document; no further receipts', async () => {
+      const doc = await openDocument((await draftWithLine()).id);
+      const item = doc.items[0];
+      expect((await receive(doc.id, item.id, 10)).status).toBe(201);
+
+      const res = await act(doc.id, 'complete');
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        status: 'COMPLETED',
+        allItemsReceived: true,
+        completedAt: expect.any(String) as string,
+        completedBy: {
+          id: supervisorUser.id,
+          fullName: supervisorUser.fullName,
+        },
+      });
+
+      const after = await receive(doc.id, item.id, 1);
+      expect(after.status).toBe(409);
+      expect(after.body).toMatchObject({
+        error: { code: 'INVALID_DOCUMENT_STATUS' },
+      });
+      await assertInventoryConsistent();
+    });
+
+    it('AC-05.2 BR-11 incomplete lines → 422 ITEMS_NOT_FULLY_RECEIVED with their ids, status unchanged', async () => {
+      const [p1, p2] = [await createProduct(), await createProduct()];
+      const doc = await openDocument(
+        (
+          await createDraftDocument(
+            [
+              { productId: p1.id, expectedQuantity: 10 },
+              { productId: p2.id, expectedQuantity: 10 },
+            ],
+            supervisorUser,
+          )
+        ).id,
+      );
+      const full = doc.items.find((i) => i.productId === p1.id)!;
+      const partial = doc.items.find((i) => i.productId === p2.id)!;
+      await receive(doc.id, full.id, 10);
+      await receive(doc.id, partial.id, 4);
+
+      const res = await act(doc.id, 'complete');
+      expect(res.status).toBe(422);
+      expect(res.body).toEqual({
+        error: {
+          code: 'ITEMS_NOT_FULLY_RECEIVED',
+          message: '1 of 2 items are not fully received.',
+          details: { incompleteItemIds: [partial.id] },
+        },
+      });
+      expect(await statusOf(doc.id)).toBe('IN_PROGRESS');
+      await assertInventoryConsistent();
+    });
 
     it.each([
       'DRAFT',

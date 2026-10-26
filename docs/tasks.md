@@ -111,7 +111,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- transitions`
 - **Done when:** all non-todo tests pass.
 
-### [ ] T012 Record receipt — the critical transaction
+### [x] T012 Record receipt — the critical transaction
 - **Refs:** prd FR-30–FR-32, FR-34, BR-07, BR-08, BR-13, US-04 (AC-04.1–AC-04.5); technical-spec §6 (all steps), §5 (last paragraph); openapi `…/receipts`, schemas `RecordReceiptRequest`, `ReceiptResult`
 - **Depends:** T011
 - **Work:** `ReceiptsService.recordReceipt` implementing steps 4–14 of spec §6 exactly (idempotency lookup may be a stub that always misses; T013 completes it). Row locks via `tx.$queryRaw` in order document → item; balance updated with `UPDATE … RETURNING`. Controller validates the `Idempotency-Key` header format. Return 201 `ReceiptResult`. Finish the `it.todo` tests from T011.
