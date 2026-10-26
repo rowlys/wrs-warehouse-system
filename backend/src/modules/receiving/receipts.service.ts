@@ -14,6 +14,14 @@ import {
   toReceipt,
 } from './receiving.mappers';
 
+type Db = PrismaService | Prisma.TransactionClient;
+
+const isIdempotencyKeyConflict = (e: unknown): boolean =>
+  e instanceof Prisma.PrismaClientKnownRequestError &&
+  e.code === 'P2002' &&
+  e.meta?.modelName === 'Receipt' &&
+  JSON.stringify(e.meta?.target) === '["idempotency_key"]';
+
 interface LockedItem {
   id: string;
   product_id: string;
@@ -36,117 +44,153 @@ export interface RecordedReceipt {
 export class ReceiptsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Spec §6 steps 4–14. */
-  recordReceipt(
+  /** Spec §6 steps 4–15. */
+  async recordReceipt(
     documentId: string,
     itemId: string,
     quantity: number,
     idempotencyKey: string,
     userId: string,
   ): Promise<RecordedReceipt> {
-    // Step 4
-    return this.prisma.$transaction(
-      async (tx) => {
-        // Step 5
-        const replay = await this.findReplay();
-        if (replay) return { result: replay, replayed: true };
+    try {
+      // Step 4
+      return await this.prisma.$transaction(
+        async (tx) => {
+          // Step 5
+          const replay = await this.findReplay(
+            tx,
+            idempotencyKey,
+            itemId,
+            quantity,
+          );
+          if (replay) return { result: replay, replayed: true };
 
-        // Steps 6–7
-        const status = await lockDocument(tx, documentId);
-        assertCan('RECEIVE', status);
+          // Steps 6–7
+          const status = await lockDocument(tx, documentId);
+          assertCan('RECEIVE', status);
 
-        // Step 8: lock only the line; the product row is read for its SKU.
-        const [item] = await tx.$queryRaw<LockedItem[]>`
+          // Step 8: lock only the line; the product row is read for its SKU.
+          const [item] = await tx.$queryRaw<LockedItem[]>`
           SELECT ri.id, ri.product_id, p.sku, ri.expected_quantity, ri.received_quantity
           FROM receiving_items ri
           JOIN products p ON p.id = ri.product_id
           WHERE ri.id = ${itemId}::uuid AND ri.receiving_document_id = ${documentId}::uuid
           FOR UPDATE OF ri`;
-        if (!item) {
-          throw new AppError(
-            ErrorCode.NOT_FOUND,
-            404,
-            'Line not found on this receiving document',
-          );
-        }
+          if (!item) {
+            throw new AppError(
+              ErrorCode.NOT_FOUND,
+              404,
+              'Line not found on this receiving document',
+            );
+          }
 
-        // Step 9 (BR-07)
-        const remaining = item.expected_quantity - item.received_quantity;
-        if (quantity > remaining) {
-          throw new AppError(
-            ErrorCode.QUANTITY_EXCEEDS_REMAINING,
-            422,
-            `Cannot receive ${quantity} units; only ${remaining} remaining for ${item.sku}.`,
-            { remainingQuantity: remaining, requestedQuantity: quantity },
-          );
-        }
+          // Step 9 (BR-07)
+          const remaining = item.expected_quantity - item.received_quantity;
+          if (quantity > remaining) {
+            throw new AppError(
+              ErrorCode.QUANTITY_EXCEEDS_REMAINING,
+              422,
+              `Cannot receive ${quantity} units; only ${remaining} remaining for ${item.sku}.`,
+              { remainingQuantity: remaining, requestedQuantity: quantity },
+            );
+          }
 
-        // Step 10
-        const receipt = await tx.receipt.create({
-          data: {
-            receivingItemId: item.id,
-            quantity,
-            idempotencyKey,
-            receivedById: userId,
-          },
-        });
+          // Step 10
+          const receipt = await tx.receipt.create({
+            data: {
+              receivingItemId: item.id,
+              quantity,
+              idempotencyKey,
+              receivedById: userId,
+            },
+          });
 
-        // Step 11
-        await tx.receivingItem.update({
-          where: { id: item.id },
-          data: { receivedQuantity: { increment: quantity } },
-        });
+          // Step 11
+          await tx.receivingItem.update({
+            where: { id: item.id },
+            data: { receivedQuantity: { increment: quantity } },
+          });
 
-        // Step 12: the UPDATE takes the balance row lock.
-        const [balance] = await tx.$queryRaw<{ quantity_on_hand: number }[]>`
+          // Step 12: the UPDATE takes the balance row lock.
+          const [balance] = await tx.$queryRaw<{ quantity_on_hand: number }[]>`
           UPDATE inventory_balances
           SET quantity_on_hand = quantity_on_hand + ${quantity}, updated_at = now()
           WHERE product_id = ${item.product_id}::uuid
           RETURNING quantity_on_hand`;
 
-        // Step 13
-        await tx.inventoryTransaction.create({
-          data: {
-            productId: item.product_id,
-            type: 'RECEIPT',
-            quantityChange: quantity,
-            balanceAfter: balance.quantity_on_hand,
-            receiptId: receipt.id,
-            receivingDocumentId: documentId,
-            createdById: userId,
-          },
-        });
-
-        // Step 14
-        if (status === 'OPEN') {
-          await tx.receivingDocument.update({
-            where: { id: documentId },
-            data: { status: nextStatus('RECEIVE', status) },
+          // Step 13
+          await tx.inventoryTransaction.create({
+            data: {
+              productId: item.product_id,
+              type: 'RECEIPT',
+              quantityChange: quantity,
+              balanceAfter: balance.quantity_on_hand,
+              receiptId: receipt.id,
+              receivingDocumentId: documentId,
+              createdById: userId,
+            },
           });
-        }
 
-        return {
-          result: await this.loadResult(tx, receipt.id),
-          replayed: false,
-        };
-      },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-        timeout: 10_000,
-      },
-    );
+          // Step 14
+          if (status === 'OPEN') {
+            await tx.receivingDocument.update({
+              where: { id: documentId },
+              data: { status: nextStatus('RECEIVE', status) },
+            });
+          }
+
+          return {
+            result: await this.loadResult(tx, receipt.id),
+            replayed: false,
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+          timeout: 10_000,
+        },
+      );
+    } catch (e) {
+      // Step 15: an identical request committed first. This transaction is rolled back;
+      // re-run step 5 once outside it to return the replay or 409.
+      if (!isIdempotencyKeyConflict(e)) throw e;
+      const replay = await this.findReplay(
+        this.prisma,
+        idempotencyKey,
+        itemId,
+        quantity,
+      );
+      if (!replay) throw e;
+      return { result: replay, replayed: true };
+    }
   }
 
-  // shortcut: always misses, so a reused key ends in a unique violation (500); T013 adds replay and 409.
-  private findReplay(): Promise<ReceiptResult | null> {
-    return Promise.resolve(null);
+  /**
+   * Step 5 (BR-09): a receipt with this key and the same line and quantity is replayed;
+   * the same key with anything else is rejected.
+   */
+  private async findReplay(
+    db: Db,
+    idempotencyKey: string,
+    itemId: string,
+    quantity: number,
+  ): Promise<ReceiptResult | null> {
+    const existing = await db.receipt.findUnique({
+      where: { idempotencyKey },
+      select: { id: true, receivingItemId: true, quantity: true },
+    });
+    if (!existing) return null;
+    if (existing.receivingItemId !== itemId || existing.quantity !== quantity) {
+      throw new AppError(
+        ErrorCode.IDEMPOTENCY_KEY_REUSED,
+        409,
+        'This Idempotency-Key was already used for a different receipt.',
+      );
+    }
+    return this.loadResult(db, existing.id);
   }
 
   /** Spec §6 step 16: the receipt with its line, document state and product balance. */
-  private async loadResult(
-    tx: Prisma.TransactionClient,
-    receiptId: string,
-  ): Promise<ReceiptResult> {
+  private async loadResult(tx: Db, receiptId: string): Promise<ReceiptResult> {
     const receipt = await tx.receipt.findUniqueOrThrow({
       where: { id: receiptId },
       include: RECEIPT_INCLUDE,

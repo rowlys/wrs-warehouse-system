@@ -119,7 +119,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- receipts`
 - **Done when:** all pass; no other code path writes stock (`grep -rn "inventoryBalance\|inventoryTransaction" src` shows writes only in receipts.service.ts and products.service.ts).
 
-### [ ] T013 Idempotency
+### [x] T013 Idempotency
 - **Refs:** prd FR-33, BR-09, AC-04.6, AC-04.7; technical-spec §6 steps 5 and 15
 - **Depends:** T012
 - **Work:** full step 5 (replay → 200 + `Idempotent-Replayed: true`, mismatch → 409) and step 15 (unique-violation race → rollback and re-check once).
