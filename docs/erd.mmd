@@ -1,0 +1,89 @@
+%% Warehouse Receiving System - Entity Relationship Diagram
+%% Source of truth for columns and constraints: docs/technical-spec.md section 3.2
+erDiagram
+  USERS {
+    uuid id PK
+    varchar username UK "max 50"
+    varchar password_hash "bcrypt"
+    varchar full_name
+    user_role role "OPERATOR | SUPERVISOR"
+    timestamptz created_at
+  }
+
+  PRODUCTS {
+    uuid id PK
+    varchar sku UK "upper case, ^[A-Z0-9][A-Z0-9-]{2,49}$"
+    varchar name "max 200"
+    varchar unit_of_measure "max 20"
+    varchar description "nullable"
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  INVENTORY_BALANCES {
+    uuid product_id PK, FK
+    int quantity_on_hand "CHECK >= 0"
+    timestamptz updated_at
+  }
+
+  RECEIVING_DOCUMENTS {
+    uuid id PK
+    varchar document_number UK "RCV-YYYY-NNNNNN"
+    varchar supplier_name
+    varchar reference_number "nullable"
+    date expected_date "nullable"
+    varchar notes "nullable"
+    receiving_status status "DRAFT | OPEN | IN_PROGRESS | COMPLETED | CANCELLED"
+    uuid created_by_id FK
+    timestamptz opened_at "nullable"
+    uuid opened_by_id FK "nullable"
+    timestamptz completed_at "nullable"
+    uuid completed_by_id FK "nullable"
+    timestamptz cancelled_at "nullable"
+    uuid cancelled_by_id FK "nullable"
+    varchar cancel_reason "required when CANCELLED"
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  RECEIVING_ITEMS {
+    uuid id PK
+    uuid receiving_document_id FK "UK with product_id"
+    uuid product_id FK "UK with document_id"
+    int expected_quantity "CHECK 1..1000000"
+    int received_quantity "CHECK 0..expected_quantity"
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  RECEIPTS {
+    uuid id PK
+    uuid receiving_item_id FK
+    int quantity "CHECK > 0"
+    varchar idempotency_key UK
+    uuid received_by_id FK
+    timestamptz received_at
+  }
+
+  INVENTORY_TRANSACTIONS {
+    bigint id PK "identity, ordering"
+    uuid product_id FK
+    inventory_transaction_type type "RECEIPT"
+    int quantity_change "CHECK <> 0"
+    int balance_after "CHECK >= 0"
+    uuid receipt_id FK, UK "nullable"
+    uuid receiving_document_id FK "nullable"
+    uuid created_by_id FK
+    timestamptz created_at
+  }
+
+  PRODUCTS ||--|| INVENTORY_BALANCES : "has current stock"
+  PRODUCTS ||--o{ RECEIVING_ITEMS : "appears on"
+  PRODUCTS ||--o{ INVENTORY_TRANSACTIONS : "stock changes"
+  RECEIVING_DOCUMENTS ||--o{ RECEIVING_ITEMS : "contains"
+  RECEIVING_ITEMS ||--o{ RECEIPTS : "received through"
+  RECEIPTS ||--|| INVENTORY_TRANSACTIONS : "posts"
+  RECEIVING_DOCUMENTS ||--o{ INVENTORY_TRANSACTIONS : "source of"
+  USERS ||--o{ RECEIVING_DOCUMENTS : "creates / opens / completes / cancels"
+  USERS ||--o{ RECEIPTS : "records"
+  USERS ||--o{ INVENTORY_TRANSACTIONS : "performed by"

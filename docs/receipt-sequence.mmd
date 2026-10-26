@@ -1,0 +1,34 @@
+%% Sequence: record a receipt. See technical-spec.md section 6.
+sequenceDiagram
+  autonumber
+  actor O as Operator
+  participant UI as ReceiveForm (React)
+  participant G as Guards + ValidationPipe
+  participant S as ReceiptsService
+  participant DB as PostgreSQL
+  O->>UI: enter quantity, click Receive
+  UI->>UI: reuse or create Idempotency-Key (crypto.randomUUID)
+  UI->>G: POST /receiving-documents/{d}/items/{i}/receipts {quantity}
+  G->>G: verify JWT, role OPERATOR or SUPERVISOR, validate body + header
+  alt invalid token / role / input
+    G-->>UI: 401 / 403 / 400
+  end
+  G->>S: recordReceipt(d, i, quantity, key, user)
+  S->>DB: BEGIN
+  S->>DB: SELECT receipt WHERE idempotency_key = key
+  alt key already used
+    S->>DB: COMMIT
+    S-->>UI: 200 original result (same line + qty) or 409 IDEMPOTENCY_KEY_REUSED
+  end
+  S->>DB: SELECT document FOR UPDATE
+  S->>S: status in (OPEN, IN_PROGRESS)? else 409
+  S->>DB: SELECT item FOR UPDATE
+  S->>S: quantity <= expected - received? else 422
+  S->>DB: INSERT receipts
+  S->>DB: UPDATE receiving_items received += qty
+  S->>DB: UPDATE inventory_balances on_hand += qty RETURNING on_hand
+  S->>DB: INSERT inventory_transactions (RECEIPT, +qty, balance_after)
+  S->>DB: UPDATE document status OPEN -> IN_PROGRESS (if OPEN)
+  S->>DB: COMMIT
+  S-->>UI: 201 ReceiptResult
+  UI->>UI: invalidate document, inventory, transactions queries

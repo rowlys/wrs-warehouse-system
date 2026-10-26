@@ -1,0 +1,59 @@
+%% Warehouse Receiving System - context data flow.
+%% Other diagrams: receipt-sequence.mmd (API flow), document-states.mmd (lifecycle).
+flowchart LR
+  SUP([Supervisor])
+  OPR([Operator])
+
+  subgraph WEB[Web client - React]
+    P1[Products pages]
+    P2[Receiving document pages]
+    P3[Receive form]
+    P4[Inventory and history pages]
+  end
+
+  subgraph API[NestJS API]
+    AUTH[Auth + Roles guards]
+    PS[ProductsService]
+    RDS[ReceivingDocumentsService]
+    RS[ReceiptsService - single DB transaction]
+    IS[InventoryService - read only]
+  end
+
+  subgraph DB[PostgreSQL]
+    T1[(products)]
+    T2[(receiving_documents)]
+    T3[(receiving_items)]
+    T4[(receipts)]
+    T5[(inventory_balances)]
+    T6[(inventory_transactions)]
+  end
+
+  SUP -->|SKU, name, unit| P1
+  SUP -->|supplier, lines, open / complete / cancel| P2
+  OPR -->|counted quantity| P3
+  SUP -->|counted quantity| P3
+  OPR --> P4
+  SUP --> P4
+
+  P1 -->|POST /products| AUTH
+  P2 -->|POST /receiving-documents, items, transitions| AUTH
+  P3 -->|POST receipts + Idempotency-Key| AUTH
+  P4 -->|GET /inventory, /inventory/transactions| AUTH
+
+  AUTH --> PS
+  AUTH --> RDS
+  AUTH --> RS
+  AUTH --> IS
+
+  PS -->|insert| T1
+  PS -->|insert balance 0| T5
+  RDS -->|insert / update status| T2
+  RDS -->|insert / update / delete while DRAFT| T3
+  RS -->|lock + check status| T2
+  RS -->|lock + increase received| T3
+  RS -->|insert| T4
+  RS -->|increase on hand| T5
+  RS -->|append| T6
+  IS -->|read| T5
+  IS -->|read| T6
+  IS -->|read| T1
