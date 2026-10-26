@@ -98,6 +98,25 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
+  it('P2002 as Prisma 6 reports it (modelName + column list) → 409 DUPLICATE_SKU', () => {
+    const { status, body } = run(
+      prismaError('P2002', { modelName: 'Product', target: ['sku'] }),
+    );
+    expect(status).toBe(409);
+    expect(body).toMatchObject({ error: { code: 'DUPLICATE_SKU' } });
+  });
+
+  it('P2002 on inventory_transactions.receipt_id is a bug → 500, not RECEIPT_ALREADY_REVERSED', () => {
+    const { status, body } = run(
+      prismaError('P2002', {
+        modelName: 'InventoryTransaction',
+        target: ['receipt_id'],
+      }),
+    );
+    expect(status).toBe(500);
+    expect(body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
   it('P2025 → 404 NOT_FOUND', () => {
     const { status, body } = run(prismaError('P2025'));
     expect(status).toBe(404);

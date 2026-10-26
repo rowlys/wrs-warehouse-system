@@ -11,7 +11,7 @@ import { ErrorCode } from './error-code';
 
 interface PrismaKnownError extends Error {
   code: string;
-  meta?: { target?: unknown };
+  meta?: { target?: unknown; modelName?: unknown };
 }
 
 // Matched by name so this file does not depend on the generated Prisma client.
@@ -19,27 +19,32 @@ function isPrismaKnownError(e: unknown): e is PrismaKnownError {
   return e instanceof Error && e.name === 'PrismaClientKnownRequestError';
 }
 
-// P2002 meta.target is the constraint name or the list of columns, depending on the index.
+// Prisma 6 reports P2002 as meta.modelName + meta.target (DB column list); the constraint
+// name is accepted too. The model matters: receipt_id is also unique in inventory_transactions.
 const UNIQUE_VIOLATIONS: {
   constraint: string;
+  model: string;
   columns: string;
   code: ErrorCode;
   message: string;
 }[] = [
   {
     constraint: 'products_sku_key',
+    model: 'Product',
     columns: 'sku',
     code: ErrorCode.DUPLICATE_SKU,
     message: 'A product with this SKU already exists.',
   },
   {
     constraint: 'ri_document_product_uq',
+    model: 'ReceivingItem',
     columns: 'receiving_document_id,product_id',
     code: ErrorCode.DUPLICATE_PRODUCT_IN_DOCUMENT,
     message: 'This product is already on the document.',
   },
   {
     constraint: 'receipt_reversals_receipt_id_key',
+    model: 'ReceiptReversal',
     columns: 'receipt_id',
     code: ErrorCode.RECEIPT_ALREADY_REVERSED,
     message: 'This receipt has already been reversed.',
@@ -97,7 +102,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
         const target = e.meta?.target;
         const key = Array.isArray(target) ? target.join(',') : target;
         const hit = UNIQUE_VIOLATIONS.find(
-          (u) => key === u.constraint || key === u.columns,
+          (u) =>
+            key === u.constraint ||
+            (e.meta?.modelName === u.model && key === u.columns),
         );
         if (hit) return { status: 409, code: hit.code, message: hit.message };
       }
