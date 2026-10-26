@@ -12,7 +12,7 @@
 - **Traceable.** Every test name starts with the requirement it proves (`BR-07 …`, `AC-04.3 …`), so `npm test -- -t "BR-07"` finds the evidence for any rule.
 - **Global invariant check.** After every receiving test, `assertInventoryConsistent()` verifies across the whole database that:
   - each product's on-hand quantity equals the sum of its inventory transactions and is never negative (BR-12);
-  - each line's received quantity equals the sum of its receipts and stays between 0 and expected (BR-13).
+  - each line's received quantity equals the sum of its unreversed receipts and stays between 0 and expected (BR-13).
 
 ## 2. How to run
 
@@ -37,7 +37,7 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 | T-RCV-02 | AC-04.2, FR-32 | I | Then receive the remaining 60 | received 100, fully received, on-hand 100 |
 | T-RCV-03 | AC-04.3, BR-07 | I | Receive 61 with 60 remaining | 422 `QUANTITY_EXCEEDS_REMAINING`, `details.remainingQuantity = 60`; line, receipts, balance, ledger unchanged |
 | T-RCV-04 | AC-04.4, BR-07 | I | Quantity 0, -1, 1.5, "ten", missing | 400 `VALIDATION_ERROR`; nothing changed |
-| T-RCV-05 | AC-04.5, BR-08 | I | Receive on DRAFT, COMPLETED, CANCELLED | 409 `INVALID_DOCUMENT_STATUS`; nothing changed |
+| T-RCV-05 | AC-04.5, BR-08 | I | Receive on DRAFT, COMPLETED, CLOSED_SHORT, CANCELLED | 409 `INVALID_DOCUMENT_STATUS`; nothing changed |
 | T-RCV-06 | BR-09 | I | Missing or malformed `Idempotency-Key` | 400 `VALIDATION_ERROR` |
 | T-RCV-07 | — | I | Item ID that belongs to another document | 404 `NOT_FOUND` |
 | T-IDM-01 | AC-04.6, BR-09 | I | Same request + key sent twice in sequence | 201 then 200 with same receipt id and `Idempotent-Replayed: true`; stock counted once |
@@ -47,17 +47,27 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 | T-CON-02 | BR-12, BR-14 | I | 20 parallel receipts of 1 across 2 documents for the same product | on-hand +20 exactly; ledger has 20 rows; balances reconcile |
 | T-CON-03 | BR-14 | I | Receipt and cancel in parallel on an OPEN document | exactly one succeeds; never "cancelled with stock received" |
 | T-CON-04 | BR-14 | I | Last receipt and complete in parallel | complete succeeds only if it ran after the receipt; never "completed while not fully received" |
+| T-CON-05 | AC-09.4, BR-19 | I | Two reversals of the same receipt in parallel | exactly one 200; one reversal row, one `RECEIPT_REVERSAL` ledger row |
+| T-CON-06 | BR-13, BR-14 | I | Reversal and a new receipt on the same line in parallel | both serialize on the document lock; received and on-hand reconcile |
 | T-INV-01 | AC-06.1 | I | Receipts 40 + 60 | inventory shows 100 |
 | T-INV-02 | AC-06.2 | I | Transactions filtered by product | 2 rows, newest first, correct balance after, document number and user |
 | T-INV-03 | AC-06.3, BR-12 | I | Reconciliation after every receiving test | Σ ledger = on-hand for every product |
 | T-DB-01 | BR-13, NFR-01 | I | Direct SQL update setting received > expected | rejected by `ri_received_range_chk` |
 | T-DB-02 | BR-12, NFR-01 | I | Direct SQL update setting a negative balance | rejected by `ib_non_negative_chk` |
+| T-DB-03 | BR-19, NFR-01 | I | Direct SQL insert of a second reversal for the same receipt | rejected by the unique `receipt_id` |
+| T-REV-01 | AC-09.1, FR-37 | I | Reverse the only receipt (100) | reversal stored; received 0; on-hand 0; ledger −100 / balance after 0; original receipt and RECEIPT row unchanged; status OPEN |
+| T-REV-02 | AC-09.2 | I | Then receive 10 | received 10; IN_PROGRESS; ledger +100, −100, +10 |
+| T-REV-03 | AC-09.3 | I | Receipts 40 + 60, reverse the 60 | received 40; on-hand −60; status stays IN_PROGRESS |
+| T-REV-04 | AC-09.4, BR-19 | I | Reverse the same receipt twice | 409 `RECEIPT_ALREADY_REVERSED`; nothing changed |
+| T-REV-05 | AC-09.5, BR-18 | I | Reverse on OPEN (after full reversal), COMPLETED, CLOSED_SHORT | 409 `INVALID_DOCUMENT_STATUS`; nothing changed |
+| T-REV-06 | AC-09.6, BR-17, BR-18 | I | Receipt of another document; empty reason | 404; 400; nothing changed |
+| T-REV-07 | AC-05.4, A-15 | I | Cancel after a full reversal moved the document to OPEN | CANCELLED; on-hand net 0 |
 
 ### 3.2 Documents, lines and status transitions
 
 | Test ID | Requirement | Level | Scenario | Expected |
 |---|---|---|---|---|
-| T-STM-01 | BR-11, spec §7 | U | All 25 action × status combinations | allowed/denied and error code exactly per spec §7 |
+| T-STM-01 | BR-11, spec §7 | U | All 42 action × status combinations | allowed/denied and error code exactly per spec §7 |
 | T-DOC-01 | AC-03.1, FR-22 | I | Create with 2 lines | DRAFT, number `RCV-YYYY-NNNNNN`, lines received 0 |
 | T-DOC-02 | AC-03.2, BR-06 | I | Same product twice (on create and on add) | 409 `DUPLICATE_PRODUCT_IN_DOCUMENT` |
 | T-DOC-03 | AC-03.3, BR-05 | I | Expected 0, -5, 2.5, 1,000,001 | 400 |
@@ -69,8 +79,12 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 | T-DOC-09 | AC-05.1 | I | Complete when all received | COMPLETED; further receipts → 409 |
 | T-DOC-10 | AC-05.2 | I | Complete with a line outstanding | 422 `ITEMS_NOT_FULLY_RECEIVED` with `incompleteItemIds` |
 | T-DOC-11 | AC-05.3 | I | Complete DRAFT / OPEN | 409 `INVALID_STATUS_TRANSITION` |
-| T-DOC-12 | AC-05.4, AC-05.5, BR-15 | I | Cancel DRAFT / OPEN; cancel IN_PROGRESS / COMPLETED | CANCELLED with reason; 409 |
+| T-DOC-12 | AC-05.4, AC-05.5, BR-15 | I | Cancel DRAFT / OPEN; cancel IN_PROGRESS / COMPLETED / CLOSED_SHORT | CANCELLED with reason; 409 |
 | T-DOC-13 | AC-05.6, BR-15 | I | Cancel without reason | 400 |
+| T-CLS-01 | AC-08.1, FR-35 | I | Close short with 70 of 100 received | CLOSED_SHORT with reason/time/user; remaining 30; balance and ledger unchanged; receipt → 409 |
+| T-CLS-02 | AC-08.2, BR-11 | I | Close short when every line is fully received | 422 `NOTHING_SHORT` |
+| T-CLS-03 | AC-08.3 | I | Close short DRAFT / OPEN / COMPLETED / CLOSED_SHORT / CANCELLED | 409 `INVALID_STATUS_TRANSITION` |
+| T-CLS-04 | AC-08.4, BR-17 | I | Close short with empty or 2-char reason | 400 |
 | T-DOC-14 | FR-20 | I | List filtered by status, search by supplier and number, pagination meta | correct subsets and meta |
 
 ### 3.3 Products, auth and API behaviour
@@ -84,7 +98,7 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 | T-AUT-01 | AC-01.1 | I | Valid login | token + user |
 | T-AUT-02 | AC-01.2 | I | Wrong user / wrong password | identical 401 `INVALID_CREDENTIALS` bodies |
 | T-AUT-03 | AC-01.3, FR-02 | I | No / malformed / expired token on a protected route | 401 `UNAUTHENTICATED` |
-| T-AUT-04 | AC-01.4, AC-02.5, FR-03 | I | Operator calls each supervisor-only endpoint (create product, create document, line edits, open, complete, cancel) | 403 `FORBIDDEN`; nothing changed |
+| T-AUT-04 | AC-01.4, AC-02.5, FR-03 | I | Operator calls each supervisor-only endpoint (create product, create document, line edits, open, complete, close short, cancel, reverse receipt) | 403 `FORBIDDEN`; nothing changed |
 | T-API-01 | NFR-07 | I | Every path in `openapi.yaml` is routed; no undocumented routes | pass |
 | T-API-02 | spec §4.2 | U | Exception filter maps AppError, validation, P2002, unknown errors | envelope shape and codes per spec §4.3 |
 | T-HLT-01 | AC-07.1, AC-07.2 | I | DB up / DB query throws | 200 / 503 |
@@ -143,8 +157,8 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 
 | # | Limitation | Impact | Possible improvement |
 |---|---|---|---|
-| L-1 | Short deliveries cannot be closed (PRD Q-01) | A document stays IN_PROGRESS forever if the supplier never sends the rest | "Close short" supervisor action with reason and a `COMPLETED_SHORT` status |
-| L-2 | No receipt correction (PRD Q-02) | A counting mistake cannot be fixed in the system | Reversal transaction type with supervisor approval; never edit history |
+| L-1 | No correction after `COMPLETED` or `CLOSED_SHORT` (PRD §5.2) | A miscount found after the document is closed cannot be fixed in the system | General stock adjustment feature with its own ledger type and approval |
+| L-2 | Reversal is whole-receipt only (PRD A-14) | Fixing 100 → 10 takes two steps (reverse, then receive 10) | Acceptable; the two-step trail is clearer than an edit |
 | L-3 | No lot / expiry / temperature capture (PRD Q-06) | Not sufficient for real cold-chain traceability | Add lot, production and expiry dates per receipt; FEFO reporting |
 | L-4 | Single warehouse, no locations | Cannot say where stock is stored | Locations and putaway tasks |
 | L-5 | Access token only, no refresh or revocation | Session ends after 8 h; a leaked token is valid until expiry | Refresh tokens with rotation, server-side revocation list |

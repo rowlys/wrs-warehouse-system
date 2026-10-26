@@ -11,8 +11,8 @@ You are implementing a specified system, not designing one. The specs are the so
 ## Rules
 - IMPORTANT: Never invent business behaviour. If the specs are silent or contradict each other, stop and ask. If you must choose to keep going, pick the simplest option and record it in `docs/ai-workflow.md` → "Decisions made during implementation".
 - Every business rule is enforced in the backend. Frontend validation is a convenience only.
-- Only `ReceiptsService.recordReceipt` (and product creation's zero balance) may write `inventory_balances` or `inventory_transactions`.
-- Receipt, open, complete, cancel and line edits run in one DB transaction and lock in this order: document → item → balance (`SELECT … FOR UPDATE` via `tx.$queryRaw`).
+- Only `ReceiptsService.recordReceipt`, `ReceiptsService.reverseReceipt` (and product creation's zero balance) may write `inventory_balances` or `inventory_transactions`.
+- Receipt, reversal, open, complete, close short, cancel and line edits run in one DB transaction and lock in this order: document → item → balance (`SELECT … FOR UPDATE` via `tx.$queryRaw`).
 - Do not add features, endpoints, fields or libraries that are not in the specs.
 - Do not mock the database in integration tests. Use the real `wrs_test` PostgreSQL database.
 - Name tests after the rule they prove: `it('BR-07 rejects receipt above remaining quantity', …)`.

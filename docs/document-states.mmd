@@ -5,7 +5,10 @@ stateDiagram-v2
   DRAFT --> CANCELLED: cancel with reason
   OPEN --> IN_PROGRESS: first receipt (automatic)
   OPEN --> CANCELLED: cancel with reason
-  IN_PROGRESS --> IN_PROGRESS: more receipts
+  IN_PROGRESS --> IN_PROGRESS: more receipts or reversals
+  IN_PROGRESS --> OPEN: reversal leaves nothing received (automatic)
   IN_PROGRESS --> COMPLETED: complete, all lines fully received
+  IN_PROGRESS --> CLOSED_SHORT: close short with reason, at least 1 line short
   COMPLETED --> [*]
+  CLOSED_SHORT --> [*]
   CANCELLED --> [*]

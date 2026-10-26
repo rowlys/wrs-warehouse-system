@@ -9,6 +9,8 @@ Derived from [prd.md](prd.md) and [technical-spec.md](technical-spec.md). The ag
 - **Verify** — commands whose output proves the task works
 - **Done when** — checklist the agent reports against
 
+Task IDs are stable. T026–T028 were added with PRD v1.1 (close short, receipt reversal) and sit in the phase where they run, not in numeric order.
+
 Review gates (🔍) are points where the human reviews the diff, optionally runs the `spec-reviewer` subagent, and only then continues.
 
 ---
@@ -44,7 +46,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 ### [ ] T004 Integration test harness
 - **Refs:** technical-spec §3.3 (point 7), §9
 - **Depends:** T002, T003
-- **Work:** Jest config for integration tests using `DATABASE_URL` of `wrs_test` (from `.env.test`, git-ignored, with `.env.test.example` committed); global setup running `prisma migrate reset --force --skip-seed` once; helpers in `backend/test/helpers/`: `createTestApp()` (real Nest app, same global pipes/filters as `main.ts`), `truncateAll()`, `createUser(role)`, `loginAs(role)` → token, factories `createProduct()`, `createDraftDocument(lines)`, `openDocument()`, and `assertInventoryConsistent()` which checks BR-12 (balance = Σ ledger per product, never negative) and BR-13 (received = Σ receipts per line, 0 ≤ received ≤ expected) across the whole DB.
+- **Work:** Jest config for integration tests using `DATABASE_URL` of `wrs_test` (from `.env.test`, git-ignored, with `.env.test.example` committed); global setup running `prisma migrate reset --force --skip-seed` once; helpers in `backend/test/helpers/`: `createTestApp()` (real Nest app, same global pipes/filters as `main.ts`), `truncateAll()`, `createUser(role)`, `loginAs(role)` → token, factories `createProduct()`, `createDraftDocument(lines)`, `openDocument()`, and `assertInventoryConsistent()` which checks BR-12 (balance = Σ ledger per product, never negative) and BR-13 (received = Σ unreversed receipts per line, 0 ≤ received ≤ expected) across the whole DB.
 - **Tests:** a smoke test using every helper.
 - **Verify:** `cd backend && npm test -- harness`
 - **Done when:** tests run against a real database, isolated per test via truncation, and finish in < 30 s.
@@ -80,10 +82,10 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 ### [ ] T008 Receiving document state machine (pure)
 - **Refs:** prd §9, BR-11; technical-spec §7
 - **Depends:** T002
-- **Work:** `document-state.ts` with `assertCan(action, status)` and `nextStatus(action, status)`.
-- **Tests:** unit test for every action × status combination (5 × 5 = 25 cases) asserting allowed/denied and the correct error code (`INVALID_DOCUMENT_STATUS` for RECEIVE/EDIT_ITEMS, `INVALID_STATUS_TRANSITION` for OPEN/COMPLETE/CANCEL).
+- **Work:** `document-state.ts` with `assertCan(action, status)` and `nextStatus(action, status)`, including `CLOSE_SHORT`, `REVERSE` and `CLOSED_SHORT`.
+- **Tests:** unit test for every action × status combination (7 × 6 = 42 cases) asserting allowed/denied and the correct error code (`INVALID_DOCUMENT_STATUS` for RECEIVE/REVERSE/EDIT_ITEMS, `INVALID_STATUS_TRANSITION` for OPEN/COMPLETE/CLOSE_SHORT/CANCEL).
 - **Verify:** `cd backend && npm test -- document-state`
-- **Done when:** 25/25 cases pass; no DB access in this file.
+- **Done when:** 42/42 cases pass; no DB access in this file.
 
 ### [ ] T009 Create, list and view receiving documents
 - **Refs:** prd FR-20–FR-23, BR-04–BR-06, BR-16, US-03 (AC-03.1–AC-03.3); technical-spec §4.4, §6.1 (Create document); openapi `/receiving-documents`, `/receiving-documents/{documentId}`
@@ -129,7 +131,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Refs:** prd BR-12, BR-14, AC-04.8, AC-06.3; technical-spec §6 (Concurrency reasoning)
 - **Depends:** T013
 - **Work:** tests only, plus fixes if they fail.
-- **Tests:** `AC-04.8` (5 × 4 units against remaining 10, parallel, distinct keys → exactly 2 succeed); 20 parallel receipts of 1 across two lines of the same product → totals exact; receipt racing with `cancel` on an OPEN document → either the receipt wins (cancel gets 409) or cancel wins (receipt gets 409), never both; receipt racing with `complete` → consistent; final `assertInventoryConsistent()`. Run the concurrency file 10 times in a loop to detect flakiness.
+- **Tests:** `AC-04.8` (5 × 4 units against remaining 10, parallel, distinct keys → exactly 2 succeed); 20 parallel receipts of 1 across two documents that each have a line for the same product → totals exact; receipt racing with `cancel` on an OPEN document → either the receipt wins (cancel gets 409) or cancel wins (receipt gets 409), never both; receipt racing with `complete` → consistent; final `assertInventoryConsistent()`. Run the concurrency file 10 times in a loop to detect flakiness.
 - **Verify:** `cd backend && for i in $(seq 10); do npm test -- concurrency || exit 1; done`
 - **Done when:** 10/10 runs green. Output is pasted into `docs/testing.md` as evidence.
 
@@ -141,9 +143,25 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- inventory`
 - **Done when:** shapes match openapi `InventoryBalance` / `InventoryTransaction`.
 
+### [ ] T026 Close short
+- **Refs:** prd FR-35, BR-11, BR-17, US-08, §9; technical-spec §3.2 (`receiving_documents`), §6.1 (Close short), §7, §8; openapi `/receiving-documents/{documentId}/close-short`, `ReasonRequest`, `ReceivingDocumentDetail`
+- **Depends:** T012
+- **Work:** `POST …/close-short` (SUPERVISOR), one transaction with document `FOR UPDATE`, using `document-state.ts`; records `closed_short_at`, `closed_short_by_id`, `close_short_reason`. No stock writes. Detail response includes `closedShortAt`, `closedShortBy`, `closeShortReason`.
+- **Tests:** `AC-08.1` (assert balance and ledger unchanged, then receipt → 409), `AC-08.2`, `AC-08.3` (each of the 5 statuses), `AC-08.4`, operator → 403. `assertInventoryConsistent()` at the end of every test.
+- **Verify:** `cd backend && npm test -- close-short`
+- **Done when:** all pass.
+
+### [ ] T027 Receipt reversal
+- **Refs:** prd FR-36, FR-37, BR-12, BR-13, BR-17–BR-19, US-09; technical-spec §3.2 (`receipt_reversals`, `inventory_transactions`), §4.3, §6.2 (all steps); openapi `…/receipts/{receiptId}/reverse`, `Receipt`, `ReceiptReversal`, `InventoryTransaction`
+- **Depends:** T014, T015
+- **Work:** `ReceiptsService.reverseReceipt` implementing spec §6.2 steps 4–15 in order, locks via `tx.$queryRaw` document → item, balance via `UPDATE … RETURNING`. Map P2002 on `receipt_reversals_receipt_id_key` → 409. Detail response shows `reversal` per receipt; transactions list returns `RECEIPT_REVERSAL` rows with `receiptReversalId`.
+- **Tests:** `AC-09.1` (status back to OPEN, original receipt and RECEIPT row unchanged), `AC-09.2`, `AC-09.3`, `AC-09.4` (sequential and two parallel reversals → exactly one 200), `AC-09.5`, `AC-09.6`; reversal racing with a receipt on the same line → totals consistent; `AC-05.4` cancel works after AC-09.1. `assertInventoryConsistent()` at the end of every test.
+- **Verify:** `cd backend && npm test -- reversal`
+- **Done when:** all pass; stock writes still only in `receipts.service.ts` and `products.service.ts`.
+
 ### [ ] T016 API documentation and contract check
 - **Refs:** technical-spec §0 (API docs), §4; openapi (all)
-- **Depends:** T005–T015
+- **Depends:** T005–T015, T026, T027
 - **Work:** serve `docs/openapi.yaml` with Swagger UI at `/api/docs` (copy the file into the image at build time). Run the `spec-reviewer` subagent over the whole backend and fix every GAP.
 - **Tests:** a test that loads `openapi.yaml` and asserts every path+method in it is routed in the app (no 404 for any documented route) and no undocumented route exists.
 - **Verify:** `cd backend && npm test` (full suite) `&& npm run lint && npm run build`
@@ -192,6 +210,14 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Tests:** Vitest: the same key is sent on retry after a network error; a new key after success; max is enforced.
 - **Verify:** `cd frontend && npm test && npm run build`; manual: partial then full receipt; double-click does not double-receive.
 - **Done when:** AC-04.9 holds.
+
+### [ ] T028 Close short and reversal in the UI
+- **Refs:** prd FR-23, FR-35, FR-36, US-08, US-09; technical-spec §7, §8; openapi `…/close-short`, `…/receipts/{receiptId}/reverse`
+- **Depends:** T021, T026, T027
+- **Work:** on the detail page (supervisor only): in IN_PROGRESS with at least one line short, "Close short" with a required reason dialog (reuse the cancel dialog); in IN_PROGRESS, a "Reverse" action per receipt that is not reversed, with a required reason dialog. Reversed receipts show as struck through with reason, time and user. On a CLOSED_SHORT document the remaining column is labelled "Short" and the close-short reason is shown. On success invalidate the document, inventory and transactions queries.
+- **Tests:** Vitest: close-short and reverse visibility per role × status; reverse hidden on an already reversed receipt.
+- **Verify:** `cd frontend && npm test && npm run build`; manual run of US-08 and US-09.
+- **Done when:** both actions work from the UI and API errors are displayed.
 
 ### [ ] T022 Inventory and transaction history pages
 - **Refs:** prd FR-40, FR-41, US-06; openapi `/inventory*`

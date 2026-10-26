@@ -26,10 +26,11 @@ flowchart LR
     T4[(receipts)]
     T5[(inventory_balances)]
     T6[(inventory_transactions)]
+    T7[(receipt_reversals)]
   end
 
   SUP -->|SKU, name, unit| P1
-  SUP -->|supplier, lines, open / complete / cancel| P2
+  SUP -->|supplier, lines, open / complete / close short / cancel, reverse receipt| P2
   OPR -->|counted quantity| P3
   SUP -->|counted quantity| P3
   OPR --> P4
@@ -37,6 +38,7 @@ flowchart LR
 
   P1 -->|POST /products| AUTH
   P2 -->|POST /receiving-documents, items, transitions| AUTH
+  P2 -->|POST receipt reverse| AUTH
   P3 -->|POST receipts + Idempotency-Key| AUTH
   P4 -->|GET /inventory, /inventory/transactions| AUTH
 
@@ -49,10 +51,11 @@ flowchart LR
   PS -->|insert balance 0| T5
   RDS -->|insert / update status| T2
   RDS -->|insert / update / delete while DRAFT| T3
-  RS -->|lock + check status| T2
-  RS -->|lock + increase received| T3
+  RS -->|lock + check / update status| T2
+  RS -->|lock + increase / decrease received| T3
   RS -->|insert| T4
-  RS -->|increase on hand| T5
+  RS -->|insert reversal| T7
+  RS -->|increase / decrease on hand| T5
   RS -->|append| T6
   IS -->|read| T5
   IS -->|read| T6

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.0 |
+| Version | 1.1 (Q-01 close short and Q-02 receipt reversal added) |
 | Status | Approved for implementation |
 | Last updated | 2026-10-26 |
 | Related docs | [technical-spec.md](technical-spec.md), [openapi.yaml](openapi.yaml), [erd.mmd](erd.mmd), [tasks.md](tasks.md) |
@@ -32,7 +32,7 @@ The warehouse records incoming inventory in spreadsheets. This causes three recu
 
 | Role | Who | Responsibilities in the system |
 |---|---|---|
-| **Warehouse Supervisor** (`SUPERVISOR`) | Shift lead / inbound planner | Maintains the product catalogue. Creates receiving documents from supplier delivery notices, defines expected quantities, releases (opens) documents for receiving, completes or cancels documents. May also record receipts. |
+| **Warehouse Supervisor** (`SUPERVISOR`) | Shift lead / inbound planner | Maintains the product catalogue. Creates receiving documents from supplier delivery notices, defines expected quantities, releases (opens) documents for receiving, completes, closes short or cancels documents, reverses mistaken receipts. May also record receipts. |
 | **Warehouse Operator** (`OPERATOR`) | Dock / receiving staff | Views open receiving documents, physically counts goods and records received quantities. Views inventory and transaction history. |
 
 **Design decision (A-03):** Operators cannot create documents or change expected quantities. The person who defines what *should* arrive is not the person who records what *did* arrive. This is a standard segregation-of-duties control and directly supports OBJ-2 and OBJ-4.
@@ -51,6 +51,9 @@ There is no user-management UI. Users are created by a seed script (A-08).
 | Remaining quantity | `expected_quantity − received_quantity` for a line |
 | On-hand quantity | Current available stock for a product |
 | Inventory transaction | Immutable ledger row recording every change to on-hand quantity |
+| Receipt reversal | A supervisor's cancellation of one whole receipt. Adds a negative ledger row; the original receipt is kept |
+| Close short | Ending an `IN_PROGRESS` document when the rest of the delivery will never arrive. Status `CLOSED_SHORT` |
+| Shortage | For a line on a `CLOSED_SHORT` document: `expected_quantity − received_quantity` |
 
 ## 5. Scope
 
@@ -60,8 +63,9 @@ There is no user-management UI. Users are created by a seed script (A-08).
 - Product listing (with search) and product creation.
 - Receiving document listing (with status filter and search), creation, and detail view.
 - Adding, changing and removing lines while a document is a draft.
-- Opening, completing and cancelling documents according to the state machine (Section 9).
+- Opening, completing, closing short and cancelling documents according to the state machine (Section 9).
 - Recording partial and full receipts per line, with protection against over-receipt, duplicates and concurrent submissions.
+- Reversing a whole receipt while the document is `IN_PROGRESS`.
 - Automatic inventory updates and an append-only inventory transaction history.
 - Inventory listing and transaction history with filters.
 - Health/readiness endpoint, containerized deployment.
@@ -75,8 +79,8 @@ There is no user-management UI. Users are created by a seed script (A-08).
 | Outbound / picking / transfers / stock adjustments | Brief covers inbound only |
 | Multiple warehouses, zones, bin locations | Single warehouse assumed (A-01) |
 | Lot / batch numbers, expiry dates, temperature logging | Valuable for cold storage but not in the brief; listed as future work |
-| Receipt reversal / correction | Requires a reversal design and approval flow; see Q-02 |
-| Short-closing a document (supplier delivered less) | See Q-01 |
+| Partial reversal or editing a receipt's quantity | Full reversal plus a new receipt covers it with a clearer audit trail (A-14) |
+| Corrections after a document is `COMPLETED` or `CLOSED_SHORT` | That is a general stock adjustment, a different feature |
 | Editing or deleting products | Brief requires listing and creation only |
 | Editing document header after creation | Not required; cancel and recreate while in draft |
 | User management, password reset, self-registration | Users are seeded (A-08) |
@@ -111,13 +115,14 @@ There is no user-management UI. Users are created by a seed script (A-08).
 | FR-20 | Any authenticated user can list receiving documents, paginated, newest first, filterable by status and searchable by document number, supplier name or reference number. |
 | FR-21 | A supervisor can create a receiving document with supplier name (required), supplier reference number (optional), expected arrival date (optional), notes (optional), and an optional initial list of lines. The new document has status `DRAFT`. |
 | FR-22 | The system assigns a unique, human-readable document number `RCV-YYYY-NNNNNN` on creation (YYYY = creation year, NNNNNN = global sequence, zero-padded). |
-| FR-23 | Any authenticated user can view a document's detail: header, status, status timestamps and actors, all lines (product SKU, name, unit, expected, received, remaining), and all receipts in chronological order. |
+| FR-23 | Any authenticated user can view a document's detail: header, status, status timestamps, actors and reasons, all lines (product SKU, name, unit, expected, received, remaining), and all receipts in chronological order, each with its reversal (reason, time, user) if it was reversed. |
 | FR-24 | A supervisor can add a line (product + expected quantity) to a `DRAFT` document. |
 | FR-25 | A supervisor can change a line's expected quantity on a `DRAFT` document. |
 | FR-26 | A supervisor can remove a line from a `DRAFT` document. |
 | FR-27 | A supervisor can open a `DRAFT` document that has at least one line, making it available for receiving (status `OPEN`). |
 | FR-28 | A supervisor can complete an `IN_PROGRESS` document when every line is fully received (status `COMPLETED`). |
 | FR-29 | A supervisor can cancel a `DRAFT` or `OPEN` document with a mandatory reason (status `CANCELLED`). |
+| FR-35 | A supervisor can close short an `IN_PROGRESS` document that has at least one line not fully received, with a mandatory reason (status `CLOSED_SHORT`). Closing short does not change stock or expected quantities; the detail view shows each line's shortage. |
 
 ### 6.4 Receiving
 
@@ -128,6 +133,8 @@ There is no user-management UI. Users are created by a seed script (A-08).
 | FR-32 | A line may receive several partial receipts until its remaining quantity reaches 0. |
 | FR-33 | Each receipt request carries a client-generated idempotency key. Re-sending the same request with the same key returns the original result and changes nothing. |
 | FR-34 | The document detail shows, per line, whether it is fully received, and shows at document level whether all lines are fully received. |
+| FR-36 | A supervisor can reverse one whole receipt of an `IN_PROGRESS` document, with a mandatory reason. There is no partial reversal: to fix a receipt of 100 that should have been 10, the supervisor reverses it and the operator receives 10 again. Under-counting needs no reversal; the operator records another receipt. |
+| FR-37 | Reversing a receipt, in a single atomic operation: creates a reversal record linked to the receipt, decreases the line's received quantity by the receipt quantity, decreases the product's on-hand quantity by the same amount, writes a `RECEIPT_REVERSAL` inventory transaction with a negative quantity, and moves the document back to `OPEN` if no line has any received quantity left. The original receipt and its inventory transaction are never changed. |
 
 ### 6.5 Inventory
 
@@ -158,12 +165,15 @@ These rules are enforced **by the backend**. Frontend checks exist only for usab
 | BR-08 | Receipts are accepted only when the document is `OPEN` or `IN_PROGRESS`. | 409 `INVALID_DOCUMENT_STATUS` |
 | BR-09 | Every receipt request must include an `Idempotency-Key` header (8–100 characters). A key that was already used for the same line and quantity returns the original receipt with HTTP 200 and no changes. A key already used with a different line or quantity is rejected. | 400 `VALIDATION_ERROR` (missing/invalid); 409 `IDEMPOTENCY_KEY_REUSED` |
 | BR-10 | Lines can be added, changed or removed only while the document is `DRAFT`. | 409 `INVALID_DOCUMENT_STATUS` |
-| BR-11 | Status changes follow the state machine in Section 9 only. A document can be opened only if it has at least one line. A document can be completed only if every line has `received_quantity = expected_quantity`. | 409 `INVALID_STATUS_TRANSITION`; 422 `DOCUMENT_HAS_NO_ITEMS`; 422 `ITEMS_NOT_FULLY_RECEIVED` |
-| BR-12 | For every product, on-hand quantity equals the sum of `quantity_change` over its inventory transactions, and is never negative. Inventory transactions are never updated or deleted. | Enforced by design and DB constraints |
-| BR-13 | For every line, `0 ≤ received_quantity ≤ expected_quantity`, and `received_quantity` equals the sum of its receipt quantities. | Enforced by DB `CHECK` constraint and transaction logic |
+| BR-11 | Status changes follow the state machine in Section 9 only. A document can be opened only if it has at least one line. A document can be completed only if every line has `received_quantity = expected_quantity`. A document can be closed short only if at least one line has `received_quantity < expected_quantity`. | 409 `INVALID_STATUS_TRANSITION`; 422 `DOCUMENT_HAS_NO_ITEMS`; 422 `ITEMS_NOT_FULLY_RECEIVED`; 422 `NOTHING_SHORT` |
+| BR-12 | For every product, on-hand quantity equals the sum of `quantity_change` over its inventory transactions, and is never negative. Inventory transactions are never updated or deleted; a reversal is a new row with a negative quantity. | Enforced by design and DB constraints |
+| BR-13 | For every line, `0 ≤ received_quantity ≤ expected_quantity`, and `received_quantity` equals the sum of the quantities of its receipts that have not been reversed. | Enforced by DB `CHECK` constraint and transaction logic |
 | BR-14 | Two concurrent receipts against the same line must never together exceed its remaining quantity. Two concurrent status changes on the same document must never both succeed if they conflict. | Enforced by row-level locking (technical spec §6) |
-| BR-15 | Cancellation requires a reason of 3–500 characters. A document that has any receipt cannot be cancelled (stock has already moved; see Q-02). | 400 `VALIDATION_ERROR`; 409 `INVALID_STATUS_TRANSITION` |
+| BR-15 | Cancellation requires a reason of 3–500 characters. A document with received goods (`IN_PROGRESS`) cannot be cancelled, because stock has already moved; close it short instead (FR-35). | 400 `VALIDATION_ERROR`; 409 `INVALID_STATUS_TRANSITION` |
 | BR-16 | Lines may only reference existing products. | 422 `PRODUCT_NOT_FOUND` |
+| BR-17 | Closing short and reversing a receipt each require a reason of 3–500 characters. | 400 `VALIDATION_ERROR` |
+| BR-18 | A receipt can be reversed only while its document is `IN_PROGRESS`, and only through the document it belongs to. | 409 `INVALID_DOCUMENT_STATUS`; 404 `NOT_FOUND` |
+| BR-19 | Each receipt can be reversed at most once, enforced by a unique constraint. | 409 `RECEIPT_ALREADY_REVERSED` |
 
 ## 8. Non-functional requirements
 
@@ -184,10 +194,11 @@ These rules are enforced **by the backend**. Frontend checks exist only for usab
 | Status | Meaning |
 |---|---|
 | `DRAFT` | Being prepared by a supervisor. Lines can be edited. No receiving. |
-| `OPEN` | Released to the dock. Lines are locked. Waiting for the first receipt. |
-| `IN_PROGRESS` | At least one receipt has been recorded. More receipts allowed until all lines are fully received. |
+| `OPEN` | Released to the dock. Lines are locked. Nothing is received: either no receipt yet, or every receipt was reversed. |
+| `IN_PROGRESS` | At least one line has a received quantity above 0. More receipts allowed until all lines are fully received; receipts can be reversed. |
 | `COMPLETED` | Supervisor confirmed that everything was received. Final. |
-| `CANCELLED` | Abandoned before any goods were received. Final. |
+| `CLOSED_SHORT` | Supervisor confirmed that the rest of the delivery will not arrive. At least one line is short. Final. |
+| `CANCELLED` | Abandoned while nothing was received. Final. |
 
 | From | To | Trigger | Who | Guard |
 |---|---|---|---|---|
@@ -195,12 +206,18 @@ These rules are enforced **by the backend**. Frontend checks exist only for usab
 | `DRAFT` | `OPEN` | Open | Supervisor | ≥ 1 line (BR-11) |
 | `OPEN` | `IN_PROGRESS` | First receipt recorded (automatic) | Operator or Supervisor | Receipt valid (BR-07–BR-09) |
 | `IN_PROGRESS` | `COMPLETED` | Complete | Supervisor | Every line fully received (BR-11) |
+| `IN_PROGRESS` | `CLOSED_SHORT` | Close short | Supervisor | Reason given (BR-17); at least one line not fully received (BR-11) |
+| `IN_PROGRESS` | `OPEN` | Receipt reversed and no line has any received quantity left (automatic) | Supervisor | Reversal valid (BR-17–BR-19) |
 | `DRAFT` | `CANCELLED` | Cancel | Supervisor | Reason given (BR-15) |
-| `OPEN` | `CANCELLED` | Cancel | Supervisor | Reason given; no receipts (BR-15) |
+| `OPEN` | `CANCELLED` | Cancel | Supervisor | Reason given (BR-15) |
 
-Any other transition is rejected with 409 `INVALID_STATUS_TRANSITION`. `COMPLETED` and `CANCELLED` are terminal.
+Any other transition is rejected with 409 `INVALID_STATUS_TRANSITION`. `COMPLETED`, `CLOSED_SHORT` and `CANCELLED` are terminal.
 
 **Design decision (A-06):** Completion is an explicit supervisor action, not automatic, even when all lines are fully received. Rationale: the brief describes completion as something that can be attempted and must be blocked; an explicit step also gives the supervisor a sign-off point before the delivery is closed. The detail view shows "All items received — ready to complete" so the supervisor knows when to act.
+
+**Design decision (A-13):** A short delivery ends as `CLOSED_SHORT`, a separate terminal status, not `COMPLETED`. "Completed" keeps meaning "everything arrived", and a short-closed document is honestly labelled as not complete. Expected quantities are not reduced, because that would rewrite history and lose the record that the supplier under-delivered, which matters for supplier disputes. Close short is not offered from `OPEN`: nothing has been received there, so Cancel already covers it.
+
+**Design decision (A-15):** When reversals leave every line with received quantity 0, the document returns to `OPEN`. `OPEN` then honestly means "nothing received", and Cancel becomes available again. `opened_at` and `opened_by` keep their original values.
 
 ## 10. User stories and acceptance criteria
 
@@ -237,7 +254,7 @@ Any other transition is rejected with 409 `INVALID_STATUS_TRANSITION`. `COMPLETE
 - **AC-04.2 (full)** Given that line with remaining 60, when I receive 60, then received = 100, remaining = 0, on-hand = 100, the line is marked fully received.
 - **AC-04.3 (over-receipt)** Given remaining 60, when I try to receive 61, then I get 422 `QUANTITY_EXCEEDS_REMAINING` with `remainingQuantity: 60` in the details, and nothing changes in the line, receipts, balance or transactions.
 - **AC-04.4 (invalid quantity)** Given a quantity of 0, -1, 1.5 or `"ten"`, then I get 400 `VALIDATION_ERROR` and nothing changes.
-- **AC-04.5 (wrong status)** Given a document that is `DRAFT`, `COMPLETED` or `CANCELLED`, when I try to receive, then I get 409 `INVALID_DOCUMENT_STATUS` and nothing changes.
+- **AC-04.5 (wrong status)** Given a document that is `DRAFT`, `COMPLETED`, `CLOSED_SHORT` or `CANCELLED`, when I try to receive, then I get 409 `INVALID_DOCUMENT_STATUS` and nothing changes.
 - **AC-04.6 (duplicate submission)** Given I submitted a receipt of 10 with key K and it succeeded, when the same request with key K is sent again, then I get HTTP 200 with the same receipt ID, and received quantity, on-hand and transaction count are unchanged.
 - **AC-04.7 (key misuse)** Given key K was used for 10 units on line L, when a request uses K for 5 units or for another line, then I get 409 `IDEMPOTENCY_KEY_REUSED` and nothing changes.
 - **AC-04.8 (concurrency)** Given remaining 10, when 5 requests of 4 units each arrive at the same time with different keys, then exactly 2 succeed, 3 fail with 422, received = 8, and on-hand increased by exactly 8.
@@ -250,7 +267,7 @@ Any other transition is rejected with 409 `INVALID_STATUS_TRANSITION`. `COMPLETE
 - **AC-05.2** Given an `IN_PROGRESS` document with any line not fully received, when I complete it, then I get 422 `ITEMS_NOT_FULLY_RECEIVED` listing the incomplete line IDs, and the status is unchanged.
 - **AC-05.3** Given an `OPEN` or `DRAFT` document, when I complete it, then I get 409 `INVALID_STATUS_TRANSITION`.
 - **AC-05.4** Given a `DRAFT` or `OPEN` document, when I cancel it with reason "Supplier cancelled shipment", then the status is `CANCELLED` with reason, time and user recorded.
-- **AC-05.5** Given an `IN_PROGRESS` or `COMPLETED` document, when I cancel it, then I get 409 `INVALID_STATUS_TRANSITION`.
+- **AC-05.5** Given an `IN_PROGRESS`, `COMPLETED` or `CLOSED_SHORT` document, when I cancel it, then I get 409 `INVALID_STATUS_TRANSITION`.
 - **AC-05.6** Given a cancel request with an empty reason, then I get 400 `VALIDATION_ERROR`.
 
 ### US-06 View inventory and history (FR-40–FR-41, BR-12)
@@ -265,6 +282,24 @@ Any other transition is rejected with 409 `INVALID_STATUS_TRANSITION`. `COMPLETE
 
 - **AC-07.1** Given the database is reachable, `GET /health` returns 200 `{"status":"ok","database":"up"}`.
 - **AC-07.2** Given the database is unreachable, `GET /health` returns 503 `{"status":"error","database":"down"}`.
+
+### US-08 Close a short delivery (FR-35, BR-11, BR-17)
+*As a supervisor, I want to close a delivery when the supplier will not send the rest, so that it does not stay open forever and the shortage stays on record.*
+
+- **AC-08.1** Given an `IN_PROGRESS` document with a line expecting 100 and received 70, when I close it short with reason "Supplier out of stock", then the status is `CLOSED_SHORT` with reason, time and user recorded, the line still shows expected 100, received 70 and a shortage of 30, on-hand and inventory transactions are unchanged, and further receipts get 409 `INVALID_DOCUMENT_STATUS`.
+- **AC-08.2** Given an `IN_PROGRESS` document where every line is fully received, when I close it short, then I get 422 `NOTHING_SHORT` and the status is unchanged.
+- **AC-08.3** Given a `DRAFT`, `OPEN`, `COMPLETED`, `CLOSED_SHORT` or `CANCELLED` document, when I close it short, then I get 409 `INVALID_STATUS_TRANSITION`.
+- **AC-08.4** Given a close-short request with an empty or 2-character reason, then I get 400 `VALIDATION_ERROR`.
+
+### US-09 Reverse a mistaken receipt (FR-36–FR-37, BR-12, BR-13, BR-17–BR-19)
+*As a supervisor, I want to undo a receipt that was entered wrongly, so that stock is correct and the history still shows what happened.*
+
+- **AC-09.1** Given an `IN_PROGRESS` document with one line expecting 100, one receipt R of 100 and on-hand 100, when I reverse R with reason "Typo, counted 10", then R is still listed with its reversal (reason, time, user), the line's received quantity is 0, on-hand is 0, a `RECEIPT_REVERSAL` transaction of −100 with balance after 0 exists, R's original `RECEIPT` transaction is unchanged, and the document is `OPEN`.
+- **AC-09.2** Given AC-09.1 happened, when the operator receives 10, then received = 10, on-hand = 10, the document is `IN_PROGRESS`, and the transactions for the product read, oldest first: +100, −100, +10.
+- **AC-09.3** Given a line with receipts of 40 and 60, when I reverse the 60, then received = 40, on-hand decreases by 60, and the document stays `IN_PROGRESS`.
+- **AC-09.4** Given the 60 receipt from AC-09.3 was reversed and the document is still `IN_PROGRESS`, when I reverse it again, then I get 409 `RECEIPT_ALREADY_REVERSED` and nothing changes. When two reversals of the same receipt arrive at the same time, exactly one succeeds.
+- **AC-09.5** Given an `OPEN` (after full reversal), `COMPLETED` or `CLOSED_SHORT` document, when I reverse one of its receipts, then I get 409 `INVALID_DOCUMENT_STATUS` and nothing changes.
+- **AC-09.6** Given a receipt ID that belongs to another document, then I get 404 `NOT_FOUND`; given an empty reason, 400 `VALIDATION_ERROR`; given I am an operator, 403 `FORBIDDEN`. In every case nothing changes.
 
 ## 11. Assumptions
 
@@ -284,6 +319,9 @@ The brief is intentionally incomplete. These are the decisions made to fill the 
 | A-10 | All timestamps are stored in UTC and displayed in the browser's local time zone (the warehouse is in Asia/Jakarta, UTC+7). | Standard practice; avoids time zone bugs. |
 | A-11 | A cancelled document stays in the system for audit; nothing is ever hard-deleted except draft lines. | Auditability (NFR-03). |
 | A-12 | Expected quantities are known when the document is created (from the supplier's delivery notice). | Needed to enforce "no more than expected". |
+| A-13 | A short delivery ends as `CLOSED_SHORT`, separate from `COMPLETED`; expected quantities are never reduced (see Section 9). | Keeps "completed" meaning everything arrived and keeps the under-delivery on record. |
+| A-14 | Reversal is whole-receipt only; there is no partial reversal or receipt edit. | Simpler to build, test and explain; the audit trail reads "received 100, reversed (typo), received 10". |
+| A-15 | A reversal that leaves nothing received moves the document back to `OPEN` (see Section 9). | `OPEN` keeps meaning "nothing received", so Cancel works again. |
 
 ## 12. Constraints
 
@@ -297,8 +335,8 @@ These would be raised with the business before a real release. The current behav
 
 | ID | Question | Current behaviour |
 |---|---|---|
-| Q-01 | **Short deliveries.** If a supplier delivers fewer units than expected and the rest will never come, how is the document closed? | The document cannot be completed and stays `IN_PROGRESS`. A proposed future "close short" supervisor action with a mandatory reason would end it as `COMPLETED_SHORT`. |
-| Q-02 | **Corrections.** How are counting mistakes corrected after a receipt is recorded? | Not supported. A proposed future reversal would write a negative `RECEIPT_REVERSAL` transaction, never edit history. |
+| Q-01 | **Short deliveries.** If a supplier delivers fewer units than expected and the rest will never come, how is the document closed? | **Resolved (v1.1):** supervisor "close short" action, status `CLOSED_SHORT` (FR-35, US-08, A-13). |
+| Q-02 | **Corrections.** How are counting mistakes corrected after a receipt is recorded? | **Resolved (v1.1):** supervisor reverses the whole receipt while the document is `IN_PROGRESS` (FR-36, FR-37, US-09, A-14). Corrections after `COMPLETED` or `CLOSED_SHORT` remain out of scope. |
 | Q-03 | **Over-delivery.** Should a small over-delivery tolerance (e.g. 5%) be accepted? | Rejected, per the brief. |
 | Q-04 | **Weighed goods.** Do any products need decimal quantities (KG)? | Integers only. |
 | Q-05 | **Unplanned deliveries.** Can operators create documents for deliveries that arrive without notice? | Only supervisors can create documents. |

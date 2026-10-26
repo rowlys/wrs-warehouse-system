@@ -158,7 +158,8 @@ Filled in during implementation. One row per meaningful prompt or correction.
 |---|---|---|---|---|
 | 1 | docs | P1 | First drafts of all `/docs` files and `CLAUDE.md` | (fill in: edits you made to the drafts) |
 | 2 | docs | P2 | | |
-| 3 | | | | |
+| 3 | docs | P7: resolve Q-01 (close short) and Q-02 (receipt reversal) | PRD v1.1 (FR-35–37, BR-17–19, US-08/09, A-13–15), spec §6.1/§6.2/§7 + DDL, OpenAPI 1.1.0, ERD/state/data-flow diagrams, tasks T026–T028, test catalogue | Agent asked two gaps before writing: close short with nothing short → 422 `NOTHING_SHORT`; reversal leaving nothing received → back to `OPEN`. Agent also found T014 described "two lines of the same product" in one document, which BR-06 forbids; fixed to two documents |
+| 4 | | | | |
 
 ### AI mistakes caught
 

@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.0 |
-| Derived from | [prd.md](prd.md) v1.0 |
+| Version | 1.1 (close short §6.1, receipt reversal §6.2) |
+| Derived from | [prd.md](prd.md) v1.1 |
 | API contract | [openapi.yaml](openapi.yaml) (source of truth for request/response shapes) |
 | Diagrams | [erd.mmd](erd.mmd), [data-flow.mmd](data-flow.mmd), [receipt-sequence.mmd](receipt-sequence.mmd), [document-states.mmd](document-states.mmd) |
 | Implementation plan | [tasks.md](tasks.md) |
@@ -71,7 +71,7 @@ backend/src/
     receiving/                 # documents, lines, transitions, receipts
       receiving-documents.controller.ts
       receiving-documents.service.ts
-      receipts.service.ts      # the critical transaction (§6)
+      receipts.service.ts      # the critical transactions: record (§6) and reverse (§6.2)
       document-state.ts        # pure state machine (§7), unit-tested
     inventory/                 # balances + transactions (read only)
     health/                    # GET /health
@@ -106,11 +106,14 @@ Full diagram: [erd.mmd](erd.mmd).
 |---|---|---|---|
 | `users` | `id` uuid | referenced by documents, receipts, transactions | `username` unique |
 | `products` | `id` uuid | 1–1 `inventory_balances`; 1–N `receiving_items`, `inventory_transactions` | `sku` unique, upper-case format check |
-| `receiving_documents` | `id` uuid | 1–N `receiving_items`; N–1 `users` (created/opened/completed/cancelled by) | `document_number` unique; status enum |
+| `receiving_documents` | `id` uuid | 1–N `receiving_items`; N–1 `users` (created/opened/completed/closed-short/cancelled by) | `document_number` unique; status enum; reason required when `CANCELLED` or `CLOSED_SHORT` |
 | `receiving_items` | `id` uuid | N–1 document (cascade delete only matters for drafts), N–1 product (restrict) | `unique(document_id, product_id)`; `expected > 0`; `0 ≤ received ≤ expected` |
-| `receipts` | `id` uuid | N–1 item, N–1 user; 1–1 inventory transaction | `idempotency_key` unique; `quantity > 0` |
+| `receipts` | `id` uuid | N–1 item, N–1 user; 1–1 inventory transaction; 1–0..1 reversal | `idempotency_key` unique; `quantity > 0`; never updated |
+| `receipt_reversals` | `id` uuid | 1–1 receipt, N–1 user; 1–1 inventory transaction | `receipt_id` unique (BR-19) |
 | `inventory_balances` | `product_id` (PK & FK) | 1–1 product | `quantity_on_hand ≥ 0` |
-| `inventory_transactions` | `id` bigint identity | N–1 product, user, document; 1–1 receipt | `receipt_id` unique; `quantity_change <> 0`; `balance_after ≥ 0` |
+| `inventory_transactions` | `id` bigint identity | N–1 product, user, document; 1–1 receipt or 1–1 reversal | `receipt_id` unique; `receipt_reversal_id` unique; `quantity_change <> 0`; `balance_after ≥ 0`; sign matches type |
+
+**Why a separate `receipt_reversals` table instead of columns on `receipts`?** Receipts stay immutable (history is never edited), and the unique `receipt_id` makes "reversed at most once" a database guarantee.
 
 **Why both a balance table and a ledger?** `inventory_balances` gives a fast, lockable current figure for listing and for the row lock in §6. `inventory_transactions` is the append-only audit trail that explains every figure. BR-12 (balance = sum of ledger) is checked by an automated reconciliation test.
 
@@ -132,8 +135,8 @@ Full diagram: [erd.mmd](erd.mmd).
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TYPE user_role AS ENUM ('OPERATOR', 'SUPERVISOR');
-CREATE TYPE receiving_status AS ENUM ('DRAFT', 'OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED');
-CREATE TYPE inventory_transaction_type AS ENUM ('RECEIPT');
+CREATE TYPE receiving_status AS ENUM ('DRAFT', 'OPEN', 'IN_PROGRESS', 'COMPLETED', 'CLOSED_SHORT', 'CANCELLED');
+CREATE TYPE inventory_transaction_type AS ENUM ('RECEIPT', 'RECEIPT_REVERSAL');
 
 CREATE TABLE users (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -172,6 +175,9 @@ CREATE TABLE receiving_documents (
   opened_by_id      uuid REFERENCES users(id),
   completed_at      timestamptz,
   completed_by_id   uuid REFERENCES users(id),
+  closed_short_at     timestamptz,
+  closed_short_by_id  uuid REFERENCES users(id),
+  close_short_reason  varchar(500),
   cancelled_at      timestamptz,
   cancelled_by_id   uuid REFERENCES users(id),
   cancel_reason     varchar(500),
@@ -182,6 +188,9 @@ CREATE TABLE receiving_documents (
   ),
   CONSTRAINT rd_completed_chk CHECK (
     (status = 'COMPLETED') = (completed_at IS NOT NULL)
+  ),
+  CONSTRAINT rd_closed_short_chk CHECK (
+    (status = 'CLOSED_SHORT') = (close_short_reason IS NOT NULL AND closed_short_at IS NOT NULL)
   )
 );
 CREATE INDEX rd_status_created_idx ON receiving_documents (status, created_at DESC);
@@ -213,6 +222,14 @@ CREATE TABLE receipts (
 );
 CREATE INDEX receipts_item_idx ON receipts (receiving_item_id, received_at);
 
+CREATE TABLE receipt_reversals (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  receipt_id      uuid         NOT NULL UNIQUE REFERENCES receipts(id) ON DELETE RESTRICT,
+  reason          varchar(500) NOT NULL,
+  reversed_by_id  uuid         NOT NULL REFERENCES users(id),
+  reversed_at     timestamptz  NOT NULL DEFAULT now()
+);
+
 CREATE TABLE inventory_balances (
   product_id        uuid PRIMARY KEY REFERENCES products(id) ON DELETE RESTRICT,
   quantity_on_hand  integer     NOT NULL DEFAULT 0,
@@ -227,12 +244,14 @@ CREATE TABLE inventory_transactions (
   quantity_change        integer NOT NULL,
   balance_after          integer NOT NULL,
   receipt_id             uuid UNIQUE REFERENCES receipts(id) ON DELETE RESTRICT,
+  receipt_reversal_id    uuid UNIQUE REFERENCES receipt_reversals(id) ON DELETE RESTRICT,
   receiving_document_id  uuid REFERENCES receiving_documents(id) ON DELETE RESTRICT,
   created_by_id          uuid NOT NULL REFERENCES users(id),
   created_at             timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT it_change_nonzero_chk CHECK (quantity_change <> 0),
   CONSTRAINT it_balance_non_negative_chk CHECK (balance_after >= 0),
-  CONSTRAINT it_receipt_link_chk CHECK (type <> 'RECEIPT' OR (receipt_id IS NOT NULL AND receiving_document_id IS NOT NULL AND quantity_change > 0))
+  CONSTRAINT it_receipt_link_chk CHECK (type <> 'RECEIPT' OR (receipt_id IS NOT NULL AND receipt_reversal_id IS NULL AND receiving_document_id IS NOT NULL AND quantity_change > 0)),
+  CONSTRAINT it_reversal_link_chk CHECK (type <> 'RECEIPT_REVERSAL' OR (receipt_reversal_id IS NOT NULL AND receipt_id IS NULL AND receiving_document_id IS NOT NULL AND quantity_change < 0))
 );
 CREATE INDEX it_product_created_idx ON inventory_transactions (product_id, id DESC);
 CREATE INDEX it_document_idx ON inventory_transactions (receiving_document_id);
@@ -277,8 +296,10 @@ Full contract: [openapi.yaml](openapi.yaml). Base path `/api/v1`. JSON only. Fie
 | DELETE | `/receiving-documents/{documentId}/items/{itemId}` | SUPERVISOR | 204 | Remove line (DRAFT) |
 | POST | `/receiving-documents/{documentId}/open` | SUPERVISOR | 200 | DRAFT → OPEN |
 | POST | `/receiving-documents/{documentId}/complete` | SUPERVISOR | 200 | IN_PROGRESS → COMPLETED |
+| POST | `/receiving-documents/{documentId}/close-short` | SUPERVISOR | 200 | IN_PROGRESS → CLOSED_SHORT |
 | POST | `/receiving-documents/{documentId}/cancel` | SUPERVISOR | 200 | DRAFT/OPEN → CANCELLED |
 | POST | `/receiving-documents/{documentId}/items/{itemId}/receipts` | OPERATOR, SUPERVISOR | 201 (200 on replay) | Record a receipt |
+| POST | `/receiving-documents/{documentId}/receipts/{receiptId}/reverse` | SUPERVISOR | 200 | Reverse one receipt (IN_PROGRESS) |
 | GET | `/inventory` | any | 200 | Current balances |
 | GET | `/inventory/transactions` | any | 200 | Ledger with filters |
 | GET | `/health` (no `/api/v1` prefix) | public | 200 / 503 | Readiness |
@@ -309,12 +330,12 @@ For `VALIDATION_ERROR`, `details` is `{ "fields": [ { "field": "sku", "message":
 | 401 | Missing/invalid/expired token; wrong login | `UNAUTHENTICATED`, `INVALID_CREDENTIALS` |
 | 403 | Authenticated but role not allowed | `FORBIDDEN` |
 | 404 | Resource in the path does not exist (or item does not belong to document) | `NOT_FOUND` |
-| 409 | Request conflicts with current state | `DUPLICATE_SKU`, `DUPLICATE_PRODUCT_IN_DOCUMENT`, `INVALID_DOCUMENT_STATUS`, `INVALID_STATUS_TRANSITION`, `IDEMPOTENCY_KEY_REUSED` |
-| 422 | Input is well-formed and state is right, but a business rule rejects it | `QUANTITY_EXCEEDS_REMAINING`, `DOCUMENT_HAS_NO_ITEMS`, `ITEMS_NOT_FULLY_RECEIVED`, `PRODUCT_NOT_FOUND` |
+| 409 | Request conflicts with current state | `DUPLICATE_SKU`, `DUPLICATE_PRODUCT_IN_DOCUMENT`, `INVALID_DOCUMENT_STATUS`, `INVALID_STATUS_TRANSITION`, `IDEMPOTENCY_KEY_REUSED`, `RECEIPT_ALREADY_REVERSED` |
+| 422 | Input is well-formed and state is right, but a business rule rejects it | `QUANTITY_EXCEEDS_REMAINING`, `DOCUMENT_HAS_NO_ITEMS`, `ITEMS_NOT_FULLY_RECEIVED`, `NOTHING_SHORT`, `PRODUCT_NOT_FOUND` |
 | 500 | Unexpected error (logged with stack; message is generic) | `INTERNAL_ERROR` |
 | 503 | Health check: database unreachable | — |
 
-Prisma errors are mapped in the global exception filter: `P2002` on `products.sku` → `DUPLICATE_SKU`; on `ri_document_product_uq` → `DUPLICATE_PRODUCT_IN_DOCUMENT`; `P2025` → `NOT_FOUND`. A PostgreSQL CHECK violation (`23514`) that reaches the filter is a bug in service logic; it is mapped to 500 and logged, never silently accepted.
+Prisma errors are mapped in the global exception filter: `P2002` on `products.sku` → `DUPLICATE_SKU`; on `ri_document_product_uq` → `DUPLICATE_PRODUCT_IN_DOCUMENT`; on `receipt_reversals_receipt_id_key` → `RECEIPT_ALREADY_REVERSED`; `P2025` → `NOT_FOUND`. A PostgreSQL CHECK violation (`23514`) that reaches the filter is a bug in service logic; it is mapped to 500 and logged, never silently accepted.
 
 ### 4.4 Pagination and filtering
 
@@ -335,9 +356,10 @@ Diagrams: [data-flow.mmd](data-flow.mmd) (context data flow), [receipt-sequence.
 | Create product | Form → `POST /products` → ValidationPipe → ProductsService: transaction { insert product, insert balance(0) } → 201 |
 | Draft document | Create page → `POST /receiving-documents` (with lines) → transaction { nextval sequence → number, insert document, insert lines } → 201 → redirect to detail |
 | Receive | ReceiveForm → `POST .../receipts` + `Idempotency-Key` → ReceiptsService transaction (§6) → 201 → frontend invalidates document, inventory and transactions queries |
+| Reverse | Receipts history row → reason dialog → `POST .../receipts/{receiptId}/reverse` → ReceiptsService transaction (§6.2) → 200 → frontend invalidates the same queries |
 | Inventory | `inventory_balances` joined with `products`; ledger from `inventory_transactions` joined with product, document, user |
 
-The only writes to `inventory_balances` and `inventory_transactions` happen inside `ReceiptsService.recordReceipt` (and the balance insert when a product is created). No other code path may change stock.
+The only writes to `inventory_balances` and `inventory_transactions` happen inside `ReceiptsService.recordReceipt` and `ReceiptsService.reverseReceipt` (and the balance insert when a product is created). No other code path may change stock.
 
 ## 6. API flow — recording a receipt (critical path)
 
@@ -365,7 +387,7 @@ Body: `{ "quantity": 40 }`
 | 16 | Controller | 201 with `ReceiptResult`: `{ receipt, item (with remainingQuantity, isFullyReceived), document: { id, documentNumber, status, allItemsReceived }, inventory: { productId, quantityOnHand } }` | |
 
 **Concurrency reasoning.**
-- The document row lock (step 6) serializes receipts with `complete` and `cancel` on the same document, so a document cannot be cancelled or completed while a receipt is half-done.
+- The document row lock (step 6) serializes receipts with `complete`, `close-short`, `cancel` and reversals on the same document, so a document cannot change status while a receipt is half-done.
 - The item row lock (step 8) means a second receipt on the same line waits, then re-reads the *updated* `received_quantity` before its check in step 9. This is what makes BR-14 / AC-04.8 hold.
 - **Lock order is always document → item → balance.** Every write path follows this order, which prevents deadlocks.
 - The `CHECK (received_quantity <= expected_quantity)` constraint is the last line of defence: if a code bug ever skipped the lock, the database rejects the write and the whole transaction rolls back.
@@ -379,31 +401,67 @@ Body: `{ "quantity": 40 }`
 |---|---|
 | Open | Lock document `FOR UPDATE` → status must be `DRAFT` (else 409 `INVALID_STATUS_TRANSITION`) → count lines ≥ 1 (else 422 `DOCUMENT_HAS_NO_ITEMS`) → set `OPEN`, `opened_at`, `opened_by_id` |
 | Complete | Lock document → status must be `IN_PROGRESS` (else 409) → select lines where `received_quantity < expected_quantity`; if any → 422 `ITEMS_NOT_FULLY_RECEIVED` with `details.incompleteItemIds` → set `COMPLETED`, `completed_at`, `completed_by_id` |
+| Close short | Lock document → status must be `IN_PROGRESS` (else 409 `INVALID_STATUS_TRANSITION`) → if no line has `received_quantity < expected_quantity` → 422 `NOTHING_SHORT` → set `CLOSED_SHORT`, `closed_short_at`, `closed_short_by_id`, `close_short_reason`. No stock writes. |
 | Cancel | Lock document → status must be `DRAFT` or `OPEN` (else 409) → set `CANCELLED`, `cancelled_at`, `cancelled_by_id`, `cancel_reason` |
 | Add / change / remove line | Lock document → status must be `DRAFT` (else 409 `INVALID_DOCUMENT_STATUS`) → product must exist (else 422 `PRODUCT_NOT_FOUND`) → write |
 | Create document | `SELECT nextval('receiving_document_number_seq')` → `RCV-{YYYY}-{6-digit zero-padded}` → insert document and lines in one transaction |
+
+### 6.2 Reversing a receipt
+
+`POST /api/v1/receiving-documents/{documentId}/receipts/{receiptId}/reverse`
+Headers: `Authorization: Bearer <jwt>`
+Body: `{ "reason": "Typo, counted 10" }`
+
+| Step | Layer | Action | Failure |
+|---|---|---|---|
+| 1 | JwtAuthGuard | Verify token | 401 `UNAUTHENTICATED` |
+| 2 | RolesGuard | Role = SUPERVISOR | 403 `FORBIDDEN` |
+| 3 | ValidationPipe / controller | `documentId`, `receiptId` are UUIDs; `reason` is 3–500 chars after trimming | 400 `VALIDATION_ERROR` |
+| 4 | ReceiptsService | **Begin transaction** (same settings as §6 step 4) | |
+| 5 | | `SELECT … FROM receiving_documents WHERE id = $1 FOR UPDATE` | 404 `NOT_FOUND` |
+| 6 | | Status must be `IN_PROGRESS` | 409 `INVALID_DOCUMENT_STATUS` |
+| 7 | | Load the receipt joined to its item, `WHERE receipts.id = $2 AND receiving_items.receiving_document_id = $1` | 404 `NOT_FOUND` |
+| 8 | | If a `receipt_reversals` row exists for the receipt | 409 `RECEIPT_ALREADY_REVERSED` |
+| 9 | | `SELECT … FROM receiving_items WHERE id = <receipt's item> FOR UPDATE` | |
+| 10 | | `INSERT INTO receipt_reversals (receipt_id, reason, reversed_by_id)` | unique violation → 409 `RECEIPT_ALREADY_REVERSED` (§4.3 mapping) |
+| 11 | | `UPDATE receiving_items SET received_quantity = received_quantity − $q, updated_at = now()` | |
+| 12 | | `UPDATE inventory_balances SET quantity_on_hand = quantity_on_hand − $q, updated_at = now() WHERE product_id = $p RETURNING quantity_on_hand` | |
+| 13 | | `INSERT INTO inventory_transactions (type 'RECEIPT_REVERSAL', quantity_change −$q, balance_after <returned>, receipt_reversal_id, receiving_document_id, created_by_id)` | |
+| 14 | | If every line of the document now has `received_quantity = 0` → set `OPEN`, `updated_at = now()` (`opened_at`/`opened_by_id` unchanged) | |
+| 15 | | **Commit** | |
+| 16 | Controller | 200 with `ReceivingDocumentDetail` | |
+
+**Reasoning.**
+- Same lock order as receiving: document → item → balance. The document lock serializes two reversals of the same receipt, so the second one sees the first in step 8; the unique `receipt_id` is the backstop.
+- No `Idempotency-Key`: a retried reversal gets 409 `RECEIPT_ALREADY_REVERSED` (or `INVALID_DOCUMENT_STATUS` if the first one moved the document to `OPEN`) and changes nothing, which is already safe.
+- Stock cannot go negative: in v1 only receipts and reversals change stock, so on-hand is always at least the sum of the product's unreversed receipts. `ib_non_negative_chk`, `it_balance_non_negative_chk` and `ri_received_range_chk` are the last line of defence; if one fires it is a bug (500, §4.3).
+- `receipts` rows and their `RECEIPT` ledger rows are never updated.
 
 ## 7. State transitions
 
 The state machine lives in `backend/src/modules/receiving/document-state.ts` as a pure function so it can be unit-tested without a database:
 
 ```ts
-type Status = 'DRAFT' | 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
-type Action = 'OPEN' | 'RECEIVE' | 'COMPLETE' | 'CANCEL' | 'EDIT_ITEMS';
+type Status = 'DRAFT' | 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED_SHORT' | 'CANCELLED';
+type Action = 'OPEN' | 'RECEIVE' | 'REVERSE' | 'COMPLETE' | 'CLOSE_SHORT' | 'CANCEL' | 'EDIT_ITEMS';
 
 const ALLOWED: Record<Action, Status[]> = {
-  EDIT_ITEMS: ['DRAFT'],
-  OPEN:       ['DRAFT'],
-  RECEIVE:    ['OPEN', 'IN_PROGRESS'],
-  COMPLETE:   ['IN_PROGRESS'],
-  CANCEL:     ['DRAFT', 'OPEN'],
+  EDIT_ITEMS:  ['DRAFT'],
+  OPEN:        ['DRAFT'],
+  RECEIVE:     ['OPEN', 'IN_PROGRESS'],
+  REVERSE:     ['IN_PROGRESS'],
+  COMPLETE:    ['IN_PROGRESS'],
+  CLOSE_SHORT: ['IN_PROGRESS'],
+  CANCEL:      ['DRAFT', 'OPEN'],
 };
 // assertCan(action, status) throws AppError(INVALID_STATUS_TRANSITION | INVALID_DOCUMENT_STATUS)
 // nextStatus(action, status): OPEN→OPEN, RECEIVE(OPEN)→IN_PROGRESS, RECEIVE(IN_PROGRESS)→IN_PROGRESS,
-//                             COMPLETE→COMPLETED, CANCEL→CANCELLED
+//                             COMPLETE→COMPLETED, CLOSE_SHORT→CLOSED_SHORT, CANCEL→CANCELLED
+// REVERSE has no nextStatus: it depends on data, so ReceiptsService sets OPEN when every line
+// is back to received 0 (§6.2 step 14), otherwise the status stays IN_PROGRESS.
 ```
 
-`RECEIVE` and `EDIT_ITEMS` raise `INVALID_DOCUMENT_STATUS`; `OPEN`, `COMPLETE` and `CANCEL` raise `INVALID_STATUS_TRANSITION`.
+`RECEIVE`, `REVERSE` and `EDIT_ITEMS` raise `INVALID_DOCUMENT_STATUS`; `OPEN`, `COMPLETE`, `CLOSE_SHORT` and `CANCEL` raise `INVALID_STATUS_TRANSITION`.
 
 ```mermaid
 stateDiagram-v2
@@ -412,9 +470,12 @@ stateDiagram-v2
   DRAFT --> CANCELLED: cancel — reason
   OPEN --> IN_PROGRESS: first receipt (automatic)
   OPEN --> CANCELLED: cancel — reason
-  IN_PROGRESS --> IN_PROGRESS: further receipts
+  IN_PROGRESS --> IN_PROGRESS: further receipts / reversals
+  IN_PROGRESS --> OPEN: reversal leaves nothing received (automatic)
   IN_PROGRESS --> COMPLETED: complete — all lines fully received
+  IN_PROGRESS --> CLOSED_SHORT: close short — reason, ≥1 line short
   COMPLETED --> [*]
+  CLOSED_SHORT --> [*]
   CANCELLED --> [*]
 ```
 
@@ -430,8 +491,9 @@ Mechanism: JWT bearer token carrying `sub` (user id), `username`, `role`. `JwtAu
 | List / view documents | `GET /receiving-documents*` | ✅ | ✅ |
 | Create document | `POST /receiving-documents` | ❌ | ✅ |
 | Add / change / remove lines | `…/items` (POST/PATCH/DELETE) | ❌ | ✅ |
-| Open / complete / cancel | `…/open`, `…/complete`, `…/cancel` | ❌ | ✅ |
+| Open / complete / close short / cancel | `…/open`, `…/complete`, `…/close-short`, `…/cancel` | ❌ | ✅ |
 | Record receipt | `…/items/{id}/receipts` | ✅ | ✅ |
+| Reverse receipt | `…/receipts/{id}/reverse` | ❌ | ✅ |
 | View inventory and transactions | `GET /inventory*` | ✅ | ✅ |
 | Health | `GET /health` | public | public |
 

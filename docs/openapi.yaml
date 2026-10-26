@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Warehouse Receiving System API
-  version: 1.0.0
+  version: 1.1.0
   license:
     name: Proprietary - technical assessment submission
   description: |
@@ -341,6 +341,36 @@ paths:
                   details:
                     incompleteItemIds: ['7d1f3c2e-5b8a-4c1e-9f0a-2b3c4d5e6f70']
 
+  /receiving-documents/{documentId}/close-short:
+    post:
+      tags: [Receiving documents]
+      summary: Close an IN_PROGRESS document whose remaining quantities will not arrive (SUPERVISOR)
+      description: No stock change; expected quantities are kept so each line's shortage stays visible (FR-35).
+      operationId: closeShortReceivingDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Status is now CLOSED_SHORT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceivingDocumentDetail' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidStatusTransition' }
+        '422':
+          description: Every line is fully received (`NOTHING_SHORT`, BR-11); use complete instead.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /receiving-documents/{documentId}/cancel:
     post:
       tags: [Receiving documents]
@@ -352,7 +382,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CancelReceivingDocumentRequest' }
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
       responses:
         '200':
           description: Status is now CANCELLED
@@ -431,6 +461,40 @@ paths:
                   details:
                     remainingQuantity: 60
                     requestedQuantity: 61
+
+  /receiving-documents/{documentId}/receipts/{receiptId}/reverse:
+    post:
+      tags: [Receipts]
+      summary: Reverse one whole receipt on an IN_PROGRESS document (SUPERVISOR)
+      description: |
+        Atomically records the reversal, decreases the line's received quantity and on-hand stock by the
+        receipt quantity, appends a negative `RECEIPT_REVERSAL` inventory transaction, and moves the document
+        back to OPEN if no line has any received quantity left (FR-37). The original receipt is never changed.
+        See technical-spec.md section 6.2.
+      operationId: reverseReceipt
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - $ref: '#/components/parameters/ReceiptId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Receipt reversed; returns the whole document
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceivingDocumentDetail' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Document is not IN_PROGRESS (`INVALID_DOCUMENT_STATUS`, BR-18) or the receipt was already reversed (`RECEIPT_ALREADY_REVERSED`, BR-19)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /inventory:
     get:
@@ -552,6 +616,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ReceiptId:
+      name: receiptId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
 
   responses:
     ValidationError:
@@ -578,7 +647,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     NotFound:
-      description: Resource not found, or item does not belong to the document (`NOT_FOUND`)
+      description: Resource not found, or item / receipt does not belong to the document (`NOT_FOUND`)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -614,9 +683,11 @@ components:
         - INVALID_DOCUMENT_STATUS
         - INVALID_STATUS_TRANSITION
         - IDEMPOTENCY_KEY_REUSED
+        - RECEIPT_ALREADY_REVERSED
         - QUANTITY_EXCEEDS_REMAINING
         - DOCUMENT_HAS_NO_ITEMS
         - ITEMS_NOT_FULLY_RECEIVED
+        - NOTHING_SHORT
         - PRODUCT_NOT_FOUND
         - INTERNAL_ERROR
 
@@ -710,7 +781,7 @@ components:
 
     ReceivingStatus:
       type: string
-      enum: [DRAFT, OPEN, IN_PROGRESS, COMPLETED, CANCELLED]
+      enum: [DRAFT, OPEN, IN_PROGRESS, COMPLETED, CLOSED_SHORT, CANCELLED]
 
     ReceivingItemInput:
       type: object
@@ -742,7 +813,8 @@ components:
           default: []
           items: { $ref: '#/components/schemas/ReceivingItemInput' }
 
-    CancelReceivingDocumentRequest:
+    ReasonRequest:
+      description: Body for cancel, close-short and reverse (BR-15, BR-17). Reason is trimmed before the length check.
       type: object
       required: [reason]
       additionalProperties: false
@@ -780,25 +852,38 @@ components:
             unitOfMeasure: { type: string }
         expectedQuantity: { type: integer }
         receivedQuantity: { type: integer }
-        remainingQuantity: { type: integer, description: expectedQuantity - receivedQuantity }
+        remainingQuantity: { type: integer, description: expectedQuantity - receivedQuantity (the shortage once the document is CLOSED_SHORT) }
         isFullyReceived: { type: boolean }
 
     Receipt:
       type: object
-      required: [id, receivingItemId, productSku, quantity, receivedAt, receivedBy]
+      required: [id, receivingItemId, productSku, quantity, receivedAt, receivedBy, reversal]
       properties:
         id: { type: string, format: uuid }
         receivingItemId: { type: string, format: uuid }
         productSku: { type: string }
-        quantity: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 1, description: Original quantity; unchanged by a reversal }
         receivedAt: { type: string, format: date-time }
         receivedBy: { $ref: '#/components/schemas/UserRef' }
+        reversal:
+          oneOf:
+            - $ref: '#/components/schemas/ReceiptReversal'
+            - type: 'null'
+
+    ReceiptReversal:
+      type: object
+      required: [id, reason, reversedAt, reversedBy]
+      properties:
+        id: { type: string, format: uuid }
+        reason: { type: string }
+        reversedAt: { type: string, format: date-time }
+        reversedBy: { $ref: '#/components/schemas/UserRef' }
 
     ReceivingDocumentDetail:
       allOf:
         - $ref: '#/components/schemas/ReceivingDocumentSummary'
         - type: object
-          required: [notes, allItemsReceived, items, receipts, openedAt, openedBy, completedAt, completedBy, cancelledAt, cancelledBy, cancelReason, updatedAt]
+          required: [notes, allItemsReceived, items, receipts, openedAt, openedBy, completedAt, completedBy, closedShortAt, closedShortBy, closeShortReason, cancelledAt, cancelledBy, cancelReason, updatedAt]
           properties:
             notes: { type: [string, 'null'] }
             allItemsReceived:
@@ -821,6 +906,12 @@ components:
               oneOf:
                 - $ref: '#/components/schemas/UserRef'
                 - type: 'null'
+            closedShortAt: { type: [string, 'null'], format: date-time }
+            closedShortBy:
+              oneOf:
+                - $ref: '#/components/schemas/UserRef'
+                - type: 'null'
+            closeShortReason: { type: [string, 'null'] }
             cancelledAt: { type: [string, 'null'], format: date-time }
             cancelledBy:
               oneOf:
@@ -870,10 +961,10 @@ components:
 
     InventoryTransaction:
       type: object
-      required: [id, type, product, quantityChange, balanceAfter, receiptId, receivingDocument, createdBy, createdAt]
+      required: [id, type, product, quantityChange, balanceAfter, receiptId, receiptReversalId, receivingDocument, createdBy, createdAt]
       properties:
         id: { type: string, description: Ledger sequence number (bigint serialized as string), example: '42' }
-        type: { type: string, enum: [RECEIPT] }
+        type: { type: string, enum: [RECEIPT, RECEIPT_REVERSAL] }
         product:
           type: object
           required: [id, sku, name]
@@ -881,9 +972,10 @@ components:
             id: { type: string, format: uuid }
             sku: { type: string }
             name: { type: string }
-        quantityChange: { type: integer }
+        quantityChange: { type: integer, description: Positive for RECEIPT, negative for RECEIPT_REVERSAL }
         balanceAfter: { type: integer, minimum: 0 }
-        receiptId: { type: [string, 'null'], format: uuid }
+        receiptId: { type: [string, 'null'], format: uuid, description: Set for RECEIPT rows }
+        receiptReversalId: { type: [string, 'null'], format: uuid, description: Set for RECEIPT_REVERSAL rows }
         receivingDocument:
           oneOf:
             - type: object

@@ -33,12 +33,15 @@ erDiagram
     varchar reference_number "nullable"
     date expected_date "nullable"
     varchar notes "nullable"
-    receiving_status status "DRAFT | OPEN | IN_PROGRESS | COMPLETED | CANCELLED"
+    receiving_status status "DRAFT | OPEN | IN_PROGRESS | COMPLETED | CLOSED_SHORT | CANCELLED"
     uuid created_by_id FK
     timestamptz opened_at "nullable"
     uuid opened_by_id FK "nullable"
     timestamptz completed_at "nullable"
     uuid completed_by_id FK "nullable"
+    timestamptz closed_short_at "nullable"
+    uuid closed_short_by_id FK "nullable"
+    varchar close_short_reason "required when CLOSED_SHORT"
     timestamptz cancelled_at "nullable"
     uuid cancelled_by_id FK "nullable"
     varchar cancel_reason "required when CANCELLED"
@@ -65,13 +68,22 @@ erDiagram
     timestamptz received_at
   }
 
+  RECEIPT_REVERSALS {
+    uuid id PK
+    uuid receipt_id FK, UK "a receipt is reversed at most once"
+    varchar reason "max 500"
+    uuid reversed_by_id FK
+    timestamptz reversed_at
+  }
+
   INVENTORY_TRANSACTIONS {
     bigint id PK "identity, ordering"
     uuid product_id FK
-    inventory_transaction_type type "RECEIPT"
-    int quantity_change "CHECK <> 0"
+    inventory_transaction_type type "RECEIPT | RECEIPT_REVERSAL"
+    int quantity_change "> 0 for RECEIPT, < 0 for RECEIPT_REVERSAL"
     int balance_after "CHECK >= 0"
-    uuid receipt_id FK, UK "nullable"
+    uuid receipt_id FK, UK "set for RECEIPT"
+    uuid receipt_reversal_id FK, UK "set for RECEIPT_REVERSAL"
     uuid receiving_document_id FK "nullable"
     uuid created_by_id FK
     timestamptz created_at
@@ -83,7 +95,10 @@ erDiagram
   RECEIVING_DOCUMENTS ||--o{ RECEIVING_ITEMS : "contains"
   RECEIVING_ITEMS ||--o{ RECEIPTS : "received through"
   RECEIPTS ||--|| INVENTORY_TRANSACTIONS : "posts"
+  RECEIPTS ||--o| RECEIPT_REVERSALS : "reversed by"
+  RECEIPT_REVERSALS ||--|| INVENTORY_TRANSACTIONS : "posts"
   RECEIVING_DOCUMENTS ||--o{ INVENTORY_TRANSACTIONS : "source of"
-  USERS ||--o{ RECEIVING_DOCUMENTS : "creates / opens / completes / cancels"
+  USERS ||--o{ RECEIVING_DOCUMENTS : "creates / opens / completes / closes short / cancels"
   USERS ||--o{ RECEIPTS : "records"
+  USERS ||--o{ RECEIPT_REVERSALS : "reverses"
   USERS ||--o{ INVENTORY_TRANSACTIONS : "performed by"
