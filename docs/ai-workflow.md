@@ -179,6 +179,9 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-26 | T003 | Host-side Prisma CLI and backend read a git-ignored `backend/.env` (copy of root `.env` with `localhost` DB host); root `.env` stays for Docker Compose | Prisma only loads `.env` from the backend project folder, not the repo root; no extra dotenv dependency |
 | 2026-10-26 | T003 | Unique keys are Prisma unique indexes (`products_sku_key`, `ri_document_product_uq`, …) rather than inline `UNIQUE` constraints as written in §3.2 | Prisma always emits unique indexes; names, enforcement and the P2002/23505 error are identical. Verified by diffing `pg_dump` of the migration against the §3.2 DDL: only this and `now()`≡`CURRENT_TIMESTAMP` differ |
 | 2026-10-26 | T003 | Seed upserts never update existing rows (`update: {}`); changing `SEED_*_PASSWORD` does not re-hash an existing user | Spec only requires no duplicates; leaving rows untouched is the simplest idempotent behaviour |
+| 2026-10-26 | T004 | Jest global setup runs `prisma migrate deploy` on `wrs_test`, not `migrate reset --force --skip-seed` (spec §3.3.7); `truncateAll()` in `beforeEach` gives the clean state | Chosen by the candidate: Prisma blocks `migrate reset` when run by an AI agent; deploy is non-destructive and truncation already isolates tests. Harness refuses any database other than `wrs_test` |
+| 2026-10-26 | T004 | `loginAs(role)` signs a JWT with the spec §8 claims (`sub`, `username`, `role`) instead of calling `POST /auth/login`; factories write through Prisma | Login (T006) and document endpoints (T009/T011) do not exist yet; the real login flow is tested in T006 |
+| 2026-10-26 | T004 | Jest runs with `maxWorkers: 1` and `testTimeout: 20000` | All test files share one database and truncate it, so files must not run in parallel; the timeout gives app start-up headroom on a cold first run |
 
 ## 9. References
 

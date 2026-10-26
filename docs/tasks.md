@@ -43,7 +43,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npx prisma migrate reset --force && npx prisma db seed && npx prisma db seed` (second seed must not duplicate) `&& npm test -- schema`
 - **Done when:** migration applies on an empty DB; seed is idempotent; constraint tests pass.
 
-### [ ] T004 Integration test harness
+### [x] T004 Integration test harness
 - **Refs:** technical-spec §3.3 (point 7), §9
 - **Depends:** T002, T003
 - **Work:** Jest config for integration tests using `DATABASE_URL` of `wrs_test` (from `.env.test`, git-ignored, with `.env.test.example` committed); global setup running `prisma migrate reset --force --skip-seed` once; helpers in `backend/test/helpers/`: `createTestApp()` (real Nest app, same global pipes/filters as `main.ts`), `truncateAll()`, `createUser(role)`, `loginAs(role)` → token, factories `createProduct()`, `createDraftDocument(lines)`, `openDocument()`, and `assertInventoryConsistent()` which checks BR-12 (balance = Σ ledger per product, never negative) and BR-13 (received = Σ unreversed receipts per line, 0 ≤ received ≤ expected) across the whole DB.
