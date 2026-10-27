@@ -86,3 +86,55 @@ export interface ReceivingDocumentSummary {
   createdAt: string
   createdBy: UserRef
 }
+
+export interface ReceivingItem {
+  id: string
+  product: { id: string; sku: string; name: string; unitOfMeasure: string }
+  expectedQuantity: number
+  receivedQuantity: number
+  /** The shortage once the document is CLOSED_SHORT. */
+  remainingQuantity: number
+  isFullyReceived: boolean
+}
+
+export interface ReceiptReversal {
+  id: string
+  reason: string
+  reversedAt: string
+  reversedBy: UserRef
+}
+
+export interface Receipt {
+  id: string
+  receivingItemId: string
+  productSku: string
+  quantity: number
+  receivedAt: string
+  receivedBy: UserRef
+  reversal: ReceiptReversal | null
+}
+
+export interface ReceivingDocumentDetail extends ReceivingDocumentSummary {
+  notes: string | null
+  allItemsReceived: boolean
+  items: ReceivingItem[]
+  receipts: Receipt[]
+  openedAt: string | null
+  openedBy: UserRef | null
+  completedAt: string | null
+  completedBy: UserRef | null
+  closedShortAt: string | null
+  closedShortBy: UserRef | null
+  closeShortReason: string | null
+  cancelledAt: string | null
+  cancelledBy: UserRef | null
+  cancelReason: string | null
+  updatedAt: string
+}
+
+export interface ReceiptResult {
+  receipt: Receipt
+  item: ReceivingItem
+  document: { id: string; documentNumber: string; status: ReceivingStatus; allItemsReceived: boolean }
+  inventory: { productId: string; quantityOnHand: number }
+}

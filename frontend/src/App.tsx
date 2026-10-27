@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppLayout } from './components/AppLayout'
 import { DocumentCreatePage } from './pages/DocumentCreatePage'
+import { DocumentDetailPage } from './pages/DocumentDetailPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProductsPage } from './pages/ProductsPage'
@@ -16,7 +17,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route path="/receiving" element={<DocumentsPage />} />
           <Route path="/receiving/new" element={<DocumentCreatePage />} />
-          <Route path="/receiving/:id" element={<Title order={2}>Receiving document</Title>} />
+          <Route path="/receiving/:id" element={<DocumentDetailPage />} />
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/inventory" element={<Title order={2}>Inventory</Title>} />
           <Route path="/inventory/transactions" element={<Title order={2}>Transactions</Title>} />

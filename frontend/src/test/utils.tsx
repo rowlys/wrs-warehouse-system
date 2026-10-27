@@ -8,7 +8,7 @@ import type { Role, User } from '../api/types'
 import { setToken } from '../api/client'
 import { AuthProvider } from '../auth/AuthProvider'
 
-type Handler = (init: RequestInit) => { status: number; body?: unknown }
+export type Handler = (init: RequestInit) => { status: number; body?: unknown }
 
 /** Stubs fetch: `routes` maps "METHOD /path" (no query string) to a response. */
 export function mockApi(routes: Record<string, Handler>) {

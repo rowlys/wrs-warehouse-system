@@ -5,6 +5,7 @@ import type {
   LoginResponse,
   Page,
   Product,
+  ReceivingDocumentDetail,
   ReceivingDocumentSummary,
   ReceivingStatus,
   User,
@@ -30,6 +31,25 @@ export const createProduct = (body: CreateProductRequest) =>
 export const listDocuments = (query: PageParams & { status?: ReceivingStatus }) =>
   api<Page<ReceivingDocumentSummary>>('/receiving-documents', { query: { ...query } })
 
-// Returns ReceivingDocumentDetail, a superset of the summary.
 export const createDocument = (body: CreateReceivingDocumentRequest) =>
-  api<ReceivingDocumentSummary>('/receiving-documents', { method: 'POST', body })
+  api<ReceivingDocumentDetail>('/receiving-documents', { method: 'POST', body })
+
+const doc = (id: string) => `/receiving-documents/${id}`
+
+export const getDocument = (id: string) => api<ReceivingDocumentDetail>(doc(id))
+
+export const addItem = (id: string, productId: string, expectedQuantity: number) =>
+  api<ReceivingDocumentDetail>(`${doc(id)}/items`, { method: 'POST', body: { productId, expectedQuantity } })
+
+export const updateItem = (id: string, itemId: string, expectedQuantity: number) =>
+  api<ReceivingDocumentDetail>(`${doc(id)}/items/${itemId}`, { method: 'PATCH', body: { expectedQuantity } })
+
+export const removeItem = (id: string, itemId: string) =>
+  api<void>(`${doc(id)}/items/${itemId}`, { method: 'DELETE' })
+
+/** Open and complete take no body; cancel and close-short need a reason (BR-15, BR-17). */
+export const changeStatus = (id: string, action: 'open' | 'complete' | 'cancel' | 'close-short', reason?: string) =>
+  api<ReceivingDocumentDetail>(`${doc(id)}/${action}`, {
+    method: 'POST',
+    body: reason === undefined ? undefined : { reason },
+  })
