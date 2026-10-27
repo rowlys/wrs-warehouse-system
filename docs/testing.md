@@ -134,9 +134,39 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 ```
 
 ### 4.4 Concurrency stress, 10 consecutive runs (T-CON-01–04)
+
+`backend/test/concurrency.spec.ts`, real `wrs_test` database, all requests over HTTP against one listening server. The cancel and complete races repeat 5 rounds per run. `assertInventoryConsistent()` (BR-12, BR-13, AC-06.3) runs after every test.
+
 ```
-(paste loop output — T014)
+$ cd backend && for i in $(seq 10); do echo "--- run $i"; npm test -- concurrency || exit 1; done
+--- run 1
+Tests:       4 passed, 4 total
+--- run 2
+Tests:       4 passed, 4 total
+--- run 3
+Tests:       4 passed, 4 total
+--- run 4
+Tests:       4 passed, 4 total
+--- run 5
+Tests:       4 passed, 4 total
+--- run 6
+Tests:       4 passed, 4 total
+--- run 7
+Tests:       4 passed, 4 total
+--- run 8
+Tests:       4 passed, 4 total
+--- run 9
+Tests:       4 passed, 4 total
+--- run 10
+Tests:       4 passed, 4 total
+
+✓ AC-04.8 BR-14 5 parallel receipts of 4 against remaining 10 → exactly 2 succeed (435 ms)
+✓ BR-12 BR-14 20 parallel receipts of 1 across two documents for the same product → totals exact (1014 ms)
+✓ BR-14 receipt racing cancel on an OPEN document → exactly one wins (631 ms)
+✓ BR-14 last receipt racing complete → never COMPLETED while a line is short (941 ms)
 ```
+
+Control check: with `FOR UPDATE` removed from the document and line locks, the AC-04.8 test and the receipt-vs-cancel test fail (`2 failed, 2 passed`; the cancel race returned 500 from a CHECK violation). So these tests catch missing locks rather than passing by luck.
 
 ### 4.5 Clean-start deployment and health check (T023)
 ```

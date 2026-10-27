@@ -127,7 +127,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- idempotency`
 - **Done when:** all pass and `assertInventoryConsistent()` holds.
 
-### [ ] T014 Concurrency and reconciliation evidence
+### [x] T014 Concurrency and reconciliation evidence
 - **Refs:** prd BR-12, BR-14, AC-04.8, AC-06.3; technical-spec §6 (Concurrency reasoning)
 - **Depends:** T013
 - **Work:** tests only, plus fixes if they fail.
