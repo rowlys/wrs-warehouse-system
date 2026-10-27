@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Strategy defined in | [technical-spec.md §9](technical-spec.md#9-testing-strategy) |
-| Status | Strategy and catalogue written before implementation. Evidence sections are filled in during tasks T014, T023–T025. |
+| Status | Strategy and catalogue written before implementation; evidence below is real command output from T014 and T023–T025. |
 
 ## 1. Approach
 
@@ -23,7 +23,7 @@
 | Concurrency stress (10 runs) | `cd backend && for i in $(seq 10); do npm test -- concurrency \|\| exit 1; done` | same |
 | Coverage | `cd backend && npm test -- --coverage` | same |
 | Frontend unit | `cd frontend && npm test` | — |
-| End-to-end | `npm run test:e2e` (repo root) | full stack running: `docker compose up --build -d` |
+| End-to-end | `npm ci && npx playwright install chromium && npm run test:e2e` (repo root) | full stack running: `docker compose up --build -d`; demo passwords in `.env` |
 
 ## 3. Test catalogue
 
@@ -119,18 +119,72 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 > Filled in with real command output during implementation. Paste output, not summaries.
 
 ### 4.1 Full backend suite
+Real `wrs_test` PostgreSQL database, no mocks of the database or Prisma.
+
 ```
-(paste `npm test -- --coverage` summary here — T016)
+$ cd backend && npm test -- --coverage
+------------------------------------|---------|----------|---------|---------|-------------------
+File                                | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+------------------------------------|---------|----------|---------|---------|-------------------
+All files                           |   98.05 |    84.57 |   98.49 |   97.97 |
+------------------------------------|---------|----------|---------|---------|-------------------
+Test Suites: 19 passed, 19 total
+Tests:       337 passed, 337 total
+
+$ cd frontend && npm test
+ Test Files  12 passed (12)
+      Tests  65 passed (65)
 ```
 
 ### 4.2 Inventory stays correct after receiving (T-RCV-01, T-RCV-02, T-INV-01–03)
+Each test also runs `assertInventoryConsistent()` afterwards: for every product, on-hand equals the sum of its ledger rows (BR-12), and every line's received quantity equals the sum of its non-reversed receipts (BR-13).
+
 ```
-(paste test output — T012/T015)
+$ cd backend && npx jest test/receipts.spec.ts test/inventory.spec.ts test/reversal.spec.ts test/idempotency.spec.ts test/schema.spec.ts --json --outputFile=jest.json
+# 71 passed, 0 failed; the lines below are this section's tests, taken from jest.json
+✓ AC-04.1 FR-31 partial receipt updates line, stock, ledger and status atomically (389 ms)
+✓ AC-04.2 FR-32 a second partial receipt fills the line (299 ms)
+✓ BR-12 on-hand accumulates across documents for the same product (384 ms)
+✓ AC-06.1 receipts of 40 and 60 show on-hand 100 (427 ms)
+✓ AC-06.2 filtered by product: two RECEIPT rows newest first with document number and user (392 ms)
+✓ AC-09.1 FR-37 reversing the only receipt zeroes line and stock, logs −100, and reopens the document (507 ms)
+✓ AC-09.2 receiving again after a full reversal → IN_PROGRESS, ledger +100, −100, +10 (507 ms)
+✓ AC-09.3 reversing one of two receipts keeps the other and stays IN_PROGRESS (403 ms)
 ```
 
+The end-to-end run (§4.6) shows the same through the UI: receipts of 4 + 6 and 5 give on-hand 10 and 5, with three ledger rows for the document.
+
 ### 4.3 Duplicate and invalid operations do not corrupt stock (T-RCV-03–05, T-IDM-01–03)
+"Nothing changes" in a test name means the test compares line, balance, ledger and receipt rows before and after the rejected call. The database tests insert by raw SQL, bypassing the API.
+
 ```
-(paste test output — T013)
+# Same run as §4.2 (71 passed, 0 failed); the lines below are this section's tests, taken from jest.json
+✓ AC-04.3 BR-07 over-receipt → 422 with remaining, and nothing changes (334 ms)
+✓ BR-07 a fully received line accepts nothing more (298 ms)
+✓ BR-09 Idempotency-Key missing → 400 VALIDATION_ERROR, nothing changes (285 ms)
+✓ BR-09 Idempotency-Key too short → 400 VALIDATION_ERROR, nothing changes (302 ms)
+✓ BR-09 Idempotency-Key too long → 400 VALIDATION_ERROR, nothing changes (265 ms)
+✓ BR-09 Idempotency-Key invalid characters → 400 VALIDATION_ERROR, nothing changes (266 ms)
+✓ AC-04.6 FR-33 the same request twice → 200 replay with the same receipt, nothing changes (511 ms)
+✓ AC-04.6 a replay returns the original receipt with the current line and stock (328 ms)
+✓ AC-04.7 the same key with another quantity → 409 IDEMPOTENCY_KEY_REUSED, nothing changes (308 ms)
+✓ AC-04.7 the same key with another line → 409 IDEMPOTENCY_KEY_REUSED, nothing changes (316 ms)
+✓ AC-04.7 the same key on a line of another document → 409 (460 ms)
+✓ BR-09 2 identical requests sent concurrently → one 201, the rest 200, one receipt (293 ms)
+✓ BR-09 5 identical requests sent concurrently → one 201, the rest 200, one receipt (477 ms)
+✓ BR-09 identical concurrent requests for the whole remaining quantity → one 201, the rest 200 (898 ms)
+✓ BR-09 the same key sent concurrently with another quantity → one 201 and 409 IDEMPOTENCY_KEY_REUSED (718 ms)
+✓ BR-09 the same key sent concurrently to lines of two documents → one 201 and 409, one receipt (948 ms)
+✓ AC-04.6 a replay after the document was COMPLETED → 200 with the original receipt (377 ms)
+✓ AC-09.4 BR-19 reversing the same receipt again → 409 RECEIPT_ALREADY_REVERSED, nothing changes (427 ms)
+✓ AC-09.4 BR-19 two parallel reversals of the same receipt → exactly one 200 (1099 ms)
+✓ AC-09.5 BR-18 OPEN after a full reversal → 409 INVALID_DOCUMENT_STATUS, nothing changes (496 ms)
+✓ AC-09.5 BR-18 COMPLETED document → 409 INVALID_DOCUMENT_STATUS, nothing changes (301 ms)
+✓ AC-09.5 BR-18 CLOSED_SHORT document → 409 INVALID_DOCUMENT_STATUS, nothing changes (344 ms)
+✓ BR-13 BR-14 a reversal racing a receipt on the same line → both succeed, totals exact (1034 ms)
+✓ BR-13 rejects received_quantity above expected_quantity at the database (21 ms)
+✓ BR-12 rejects a negative balance at the database (4 ms)
+✓ BR-19 rejects a second reversal for the same receipt at the database (5 ms)   # T-DB-03, separate run after it was added
 ```
 
 ### 4.4 Concurrency stress, 10 consecutive runs (T-CON-01–04)
@@ -218,16 +272,46 @@ node
 $ docker compose -p wrs-clean --env-file .env.example down -v && docker compose -p wrs-clean --env-file .env.example up -d --wait
 $ for i in 1 2; do npm run test:e2e; done
 === run 1
-  ✓  1 [chromium] › e2eeceiving.spec.ts:45:5 › T-E2E-01 US-03–US-06 supervisor plans, operator receives, supervisor completes, stock and ledger agree (4.0s)
-  ✓  2 [chromium] › e2eeceiving.spec.ts:100:5 › T-E2E-02 AC-02.5 operator does not see the "New product" button (363ms)
+  ✓  1 [chromium] › e2e
+eceiving.spec.ts:45:5 › T-E2E-01 US-03–US-06 supervisor plans, operator receives, supervisor completes, stock and ledger agree (4.0s)
+  ✓  2 [chromium] › e2e
+eceiving.spec.ts:100:5 › T-E2E-02 AC-02.5 operator does not see the "New product" button (363ms)
   2 passed (5.4s)
 === run 2
-  ✓  1 [chromium] › e2eeceiving.spec.ts:45:5 › T-E2E-01 US-03–US-06 supervisor plans, operator receives, supervisor completes, stock and ledger agree (3.7s)
-  ✓  2 [chromium] › e2eeceiving.spec.ts:100:5 › T-E2E-02 AC-02.5 operator does not see the "New product" button (351ms)
+  ✓  1 [chromium] › e2e
+eceiving.spec.ts:45:5 › T-E2E-01 US-03–US-06 supervisor plans, operator receives, supervisor completes, stock and ledger agree (3.7s)
+  ✓  2 [chromium] › e2e
+eceiving.spec.ts:100:5 › T-E2E-02 AC-02.5 operator does not see the "New product" button (351ms)
   2 passed (5.2s)
 ```
 
 ![Playwright HTML report](evidence/e2e-report.png)
+
+### 4.6a README on a clean clone (T025)
+
+Fresh `git clone` into a new folder (its own Compose project and volume), then the README's commands as written:
+
+```
+$ cp .env.example .env && docker compose up --build -d && docker compose ps
+wrs-readme-check-api-1   Up 15 seconds (healthy)
+wrs-readme-check-db-1    Up 20 seconds (healthy)
+wrs-readme-check-web-1   Up 9 seconds (healthy)
+$ curl localhost:8080/health
+{"status":"ok","database":"up"}
+
+# Running the tests
+backend  (npm ci, npx prisma generate, cp .env.test.example .env.test, npm test)   Test Suites: 19 passed, 19 total / Tests: 337 passed, 337 total
+frontend (npm ci, npm test)                                                         Test Files 12 passed (12) / Tests 65 passed (65)
+e2e      (npm ci, npx playwright install chromium, npm run test:e2e)                2 passed (5.9s)
+
+# Local development
+$ npx prisma migrate dev     ->  Already in sync, no schema change or pending migration was found.
+$ npx prisma db seed         ->  Seeded 2 users and 5 products
+$ npm run start:dev          ->  {"status":"ok","database":"up"} from /health (run on PORT=3001: 3000 was taken by another dev server on this machine)
+$ npm run dev (frontend)     ->  VITE ready
+```
+
+The first pass found one README gap: a fresh `npm ci` does not generate the Prisma client, so every backend suite failed with `Cannot read properties of undefined (reading 'SUPERVISOR')`. The `npx prisma generate` step was added and the run repeated.
 
 ### 4.7 Manual checklist (T-MAN-01)
 - [ ] Operator sees no create/open/complete/cancel buttons
@@ -247,4 +331,7 @@ $ for i in 1 2; do npm run test:e2e; done
 | L-5 | Access token only, no refresh or revocation | Session ends after 8 h; a leaked token is valid until expiry | Refresh tokens with rotation, server-side revocation list |
 | L-6 | Idempotency keys kept forever | `receipts.idempotency_key` grows with receipts (acceptable at this scale) | Scope keys per user and expire old ones |
 | L-7 | Users only via seed | No onboarding of new staff | User management for supervisors/admins |
-| L-8 | (add anything found during implementation) | | |
+| L-8 | `JWT_EXPIRES_IN` is not validated at startup (found in the final repo audit) | A value without a unit such as `3600` is read as milliseconds (3-second tokens); a typo such as `eight` makes every login fail with 500 | Validate `^\d+[smhd]$` in `loadConfig`, like `PORT` |
+| L-9 | Compose builds the API's database URL from `POSTGRES_PASSWORD` without URL-encoding | A password containing `@`, `/` or `:` breaks the connection | Keep the password URL-safe (README says so) or pass a full `DATABASE_URL` for the container |
+| L-10 | Supplier name and unit of measure are stored as sent, not trimmed (decision T007/T009) | The API accepts a whitespace-only supplier name; the UI rejects it | Trim them like product name, if the business agrees |
+| L-11 | Manual checklist §4.7 not yet signed off by a person | UI usability at 768 px and message readability are covered by unit tests and the E2E run only | Run the checklist on the Compose stack before the review |

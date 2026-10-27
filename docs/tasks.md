@@ -246,7 +246,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `npm run test:e2e` against the running stack; save the HTML report screenshot.
 - **Done when:** green twice in a row on a fresh `docker compose down -v` stack.
 
-### [ ] T025 Final documentation and review
+### [x] T025 Final documentation and review
 - **Refs:** assessment brief §3.E, §5; all docs
 - **Depends:** T024
 - **Work:** `README.md` (stack, prerequisites, quick start from clean machine, demo users and where their passwords come from, running unit/integration/E2E tests, env vars table, project structure, links to every doc, known limitations); finish `docs/testing.md` evidence sections with real output; finish `docs/ai-workflow.md` (prompt log, mistakes caught, decisions); run `spec-reviewer` one last time over the whole repo.

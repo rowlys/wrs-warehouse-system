@@ -86,6 +86,7 @@ describe('document transitions: open, complete, cancel', () => {
     supervisor = await loginAs(supervisorUser);
     operator = await loginAs(UserRole.OPERATOR);
   });
+  afterEach(() => assertInventoryConsistent());
 
   describe('POST /open', () => {
     it('AC-03.4 BR-11 a DRAFT with no lines → 422 DOCUMENT_HAS_NO_ITEMS, stays DRAFT', async () => {

@@ -90,8 +90,9 @@ test('T-E2E-01 US-03–US-06 supervisor plans, operator receives, supervisor com
   // US-06: inventory shows the totals, and the ledger has one row per receipt.
   await page.getByRole('link', { name: 'Inventory', exact: true }).click()
   await page.getByLabel('Search inventory').fill(`E2E-${run}`)
-  await expect(page.getByRole('row').filter({ hasText: skuA })).toContainText('10')
-  await expect(page.getByRole('row').filter({ hasText: skuB })).toContainText('5')
+  // Column 4 is "On hand"; the row also shows a date, so match the cell, not the row.
+  await expect(page.getByRole('row').filter({ hasText: skuA }).getByRole('cell').nth(3)).toHaveText('10')
+  await expect(page.getByRole('row').filter({ hasText: skuB }).getByRole('cell').nth(3)).toHaveText('5')
 
   await page.getByRole('link', { name: 'Transactions' }).click()
   await expect(page.getByRole('row').filter({ hasText: documentNumber })).toHaveCount(3)

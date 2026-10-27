@@ -54,4 +54,32 @@ describe('database schema (spec §3.2)', () => {
       INSERT INTO inventory_balances (product_id, quantity_on_hand)
       SELECT id, -1 FROM p`).rejects.toThrow(/ib_non_negative_chk/);
   });
+
+  it('BR-19 rejects a second reversal for the same receipt at the database', async () => {
+    await expect(prisma.$executeRaw`
+      WITH u AS (
+        INSERT INTO users (username, password_hash, full_name, role)
+        VALUES ('schema-test-3', 'x', 'Schema Test', 'SUPERVISOR') RETURNING id
+      ), p AS (
+        INSERT INTO products (sku, name, unit_of_measure)
+        VALUES ('SCHEMA-TEST-003', 'Schema test', 'PCS') RETURNING id
+      ), d AS (
+        INSERT INTO receiving_documents (document_number, supplier_name, created_by_id)
+        SELECT 'SCHEMA-TEST-3', 'Supplier', id FROM u RETURNING id
+      ), i AS (
+        INSERT INTO receiving_items (receiving_document_id, product_id, expected_quantity)
+        SELECT d.id, p.id, 5 FROM d, p RETURNING id
+      ), r AS (
+        INSERT INTO receipts (receiving_item_id, quantity, idempotency_key, received_by_id)
+        SELECT i.id, 1, 'schema-test-key-3', u.id FROM i, u RETURNING id
+      ), first AS (
+        INSERT INTO receipt_reversals (receipt_id, reason, reversed_by_id)
+        SELECT r.id, 'first', u.id FROM r, u
+      )
+      INSERT INTO receipt_reversals (receipt_id, reason, reversed_by_id)
+      SELECT r.id, 'second', u.id FROM r, u`).rejects.toThrow(
+      // Unique violation on receipt_reversals_receipt_id_key; raw errors name the key, not the index.
+      /23505[\s\S]*Key \(receipt_id\)/,
+    );
+  });
 });
