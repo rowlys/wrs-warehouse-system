@@ -192,6 +192,7 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-26 | T010 | Adding, changing or removing a line does not touch the document row's `updated_at`; the line carries its own `updated_at` | Spec is silent; the document row is only locked, not written, which keeps line edits to the §6.1 steps |
 | 2026-10-27 | T011 | Both 409 status errors (`INVALID_STATUS_TRANSITION`, `INVALID_DOCUMENT_STATUS`) carry `details: {currentStatus, action}` | OpenAPI shows these details for `INVALID_STATUS_TRANSITION`; using the same shape for both keeps one rule in `assertCan` and gives the UI the current status either way |
 | 2026-10-27 | T013 | An idempotent replay returns the original `receipt`, but `item`, `document` and `inventory` show the current state | The schema stores no response snapshot (spec §3.2); the receipt itself is immutable, so it is the "original result". Tested: a replay after the line was filled shows received 100 |
+| 2026-10-27 | T016 | Swagger UI is `swagger-ui-express`, pointed at the raw `docs/openapi.yaml` (served at `/api/docs/openapi.yaml`); `@nestjs/swagger` is not used | Spec §0 serves the hand-written contract; Swagger UI parses the YAML itself, so no decorators, generated spec or YAML parser are needed. The file is resolved as `<backend>/../docs/openapi.yaml`, so the T023 image must put it there |
 
 ## 9. References
 
