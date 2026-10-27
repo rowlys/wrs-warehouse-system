@@ -11,10 +11,8 @@ import { ProductPicker, type ProductOption } from '../components/ProductPicker'
 import { QuantityInput } from '../components/QuantityInput'
 import { ReasonDialog } from '../components/ReasonDialog'
 import { ReceiveForm } from '../components/ReceiveForm'
-import { quantityError } from '../components/rules'
+import { formatDateTime as when, quantityError } from '../components/rules'
 import { StatusBadge } from '../components/StatusBadge'
-
-const when = (at: string) => new Date(at).toLocaleString()
 
 function Event({ label, at, by, reason }: { label: string; at: string | null; by: UserRef | null; reason?: string | null }) {
   if (!at) return null

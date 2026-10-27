@@ -219,7 +219,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd frontend && npm test && npm run build`; manual run of US-08 and US-09.
 - **Done when:** both actions work from the UI and API errors are displayed.
 
-### [ ] T022 Inventory and transaction history pages
+### [x] T022 Inventory and transaction history pages
 - **Refs:** prd FR-40, FR-41, US-06; openapi `/inventory*`
 - **Depends:** T017, T015
 - **Work:** inventory table (SKU, name, unit, on-hand, updated) with search and pagination, each row links to transactions filtered by that product; transactions table (date/time in local zone, SKU, name, type, change, balance after, document number linking to the document, user) with product and date filters.

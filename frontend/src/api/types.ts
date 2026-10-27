@@ -138,3 +138,26 @@ export interface ReceiptResult {
   document: { id: string; documentNumber: string; status: ReceivingStatus; allItemsReceived: boolean }
   inventory: { productId: string; quantityOnHand: number }
 }
+
+export interface InventoryBalance {
+  productId: string
+  sku: string
+  name: string
+  unitOfMeasure: string
+  quantityOnHand: number
+  updatedAt: string
+}
+
+export interface InventoryTransaction {
+  /** bigint ledger id, serialized as a string. */
+  id: string
+  type: 'RECEIPT' | 'RECEIPT_REVERSAL'
+  product: { id: string; sku: string; name: string }
+  quantityChange: number
+  balanceAfter: number
+  receiptId: string | null
+  receiptReversalId: string | null
+  receivingDocument: { id: string; documentNumber: string } | null
+  createdBy: UserRef
+  createdAt: string
+}

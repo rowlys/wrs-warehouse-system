@@ -14,5 +14,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // A fixed zone with no DST (UTC+7) so local-time formatting is deterministic.
+    env: { TZ: 'Asia/Jakarta' },
   },
 })

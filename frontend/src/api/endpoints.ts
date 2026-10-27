@@ -2,6 +2,8 @@ import { api } from './client'
 import type {
   CreateProductRequest,
   CreateReceivingDocumentRequest,
+  InventoryBalance,
+  InventoryTransaction,
   LoginResponse,
   Page,
   Product,
@@ -25,6 +27,8 @@ export const getMe = () => api<User>('/auth/me')
 
 export const listProducts = (query: PageParams) =>
   api<Page<Product>>('/products', { query: { ...query } })
+
+export const getProduct = (id: string) => api<Product>(`/products/${id}`)
 
 export const createProduct = (body: CreateProductRequest) =>
   api<Product>('/products', { method: 'POST', body })
@@ -65,3 +69,9 @@ export const recordReceipt = (id: string, itemId: string, quantity: number, idem
 
 export const reverseReceipt = (id: string, receiptId: string, reason: string) =>
   api<ReceivingDocumentDetail>(`${doc(id)}/receipts/${receiptId}/reverse`, { method: 'POST', body: { reason } })
+
+export const listInventory = (query: PageParams) =>
+  api<Page<InventoryBalance>>('/inventory', { query: { ...query } })
+
+export const listTransactions = (query: { productId?: string; from?: string; to?: string; page: number }) =>
+  api<Page<InventoryTransaction>>('/inventory/transactions', { query })

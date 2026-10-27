@@ -13,12 +13,14 @@ interface Props {
   value: ProductOption | null
   onChange: (product: ProductOption | null) => void
   /** Products already on another line (BR-06): shown but not selectable. */
-  takenIds: string[]
+  takenIds?: string[]
   error?: string | null
+  /** Offer an ✕ to empty the choice, e.g. to drop a filter. */
+  clearable?: boolean
 }
 
 /** Searchable product select; the search runs on the server (SKU or name, FR-10). */
-export function ProductPicker({ value, onChange, takenIds, error }: Props) {
+export function ProductPicker({ value, onChange, takenIds = [], error, clearable }: Props) {
   const [search, setSearch] = useState('')
   // After a pick the search box shows the label; that is not a new search.
   const term = value && search === label(value) ? '' : search.trim()
@@ -44,6 +46,7 @@ export function ProductPicker({ value, onChange, takenIds, error }: Props) {
       onChange={(id) => onChange(options.find((p) => p.id === id) ?? null)}
       nothingFoundMessage={results.isFetching ? 'Searching…' : 'No products found'}
       error={error}
+      clearable={clearable}
     />
   )
 }
