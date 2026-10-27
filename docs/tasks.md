@@ -187,7 +187,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd frontend && npm test && npm run build`; manual check against AC-02.1–AC-02.5.
 - **Done when:** a supervisor can create a product and see it listed.
 
-### [ ] T019 Receiving document list and create page
+### [x] T019 Receiving document list and create page
 - **Refs:** prd FR-20–FR-22, US-03; openapi `/receiving-documents`
 - **Depends:** T017, T009
 - **Work:** list with status filter (tabs or select), search, pagination, `StatusBadge`, progress (`received / expected`); create page (supervisor only) with header fields and a dynamic line editor (product picker with search, expected quantity); prevents picking the same product twice; on success navigates to the detail page.

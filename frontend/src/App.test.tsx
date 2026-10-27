@@ -10,7 +10,16 @@ describe('routing', () => {
   })
 
   it('AC-01.1 a logged-in user sees the shell with name, role and logout', async () => {
-    renderPage(<App />, { as: 'SUPERVISOR', path: '/receiving' })
+    renderPage(<App />, {
+      as: 'SUPERVISOR',
+      path: '/receiving',
+      routes: {
+        'GET /api/v1/receiving-documents': () => ({
+          status: 200,
+          body: { data: [], meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 } },
+        }),
+      },
+    })
     expect(await screen.findByText('Test SUPERVISOR')).toBeInTheDocument()
     expect(screen.getByText('SUPERVISOR')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /log out/i })).toBeInTheDocument()
