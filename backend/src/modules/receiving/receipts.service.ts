@@ -63,6 +63,10 @@ export class ReceiptsService {
       // Step 4
       return await this.prisma.$transaction(
         async (tx) => {
+          // Step 6 before step 5: a concurrent duplicate waits here until the first request
+          // commits, then its key lookup sees that receipt (READ COMMITTED reads per statement).
+          const status = await lockDocument(tx, documentId);
+
           // Step 5
           const replay = await this.findReplay(
             tx,
@@ -72,8 +76,7 @@ export class ReceiptsService {
           );
           if (replay) return { result: replay, replayed: true };
 
-          // Steps 6–7
-          const status = await lockDocument(tx, documentId);
+          // Step 7
           assertCan('RECEIVE', status);
 
           // Step 8: lock only the line; the product row is read for its SKU.
@@ -157,8 +160,8 @@ export class ReceiptsService {
         },
       );
     } catch (e) {
-      // Step 15: an identical request committed first. This transaction is rolled back;
-      // re-run step 5 once outside it to return the replay or 409.
+      // Step 15: the same key committed first on another document's line (a different
+      // document lock). This transaction is rolled back; re-run step 5 once outside it.
       if (!isIdempotencyKeyConflict(e)) throw e;
       const replay = await this.findReplay(
         this.prisma,

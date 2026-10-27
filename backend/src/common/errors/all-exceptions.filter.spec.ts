@@ -1,4 +1,9 @@
-import { ArgumentsHost, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  BadRequestException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { IsInt, IsString, Min } from 'class-validator';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 import { AppError } from './app-error';
@@ -121,6 +126,34 @@ describe('AllExceptionsFilter', () => {
     const { status, body } = run(prismaError('P2025'));
     expect(status).toBe(404);
     expect(body).toMatchObject({ error: { code: 'NOT_FOUND' } });
+  });
+
+  it.each([
+    [{ target: 'receipt_reversals_receipt_id_key' }],
+    [{ modelName: 'ReceiptReversal', target: ['receipt_id'] }],
+  ])(
+    'BR-19 P2002 on receipt_reversals.receipt_id %j → 409 RECEIPT_ALREADY_REVERSED',
+    (meta) => {
+      const { status, body } = run(prismaError('P2002', meta));
+      expect(status).toBe(409);
+      expect(body).toMatchObject({
+        error: { code: 'RECEIPT_ALREADY_REVERSED' },
+      });
+    },
+  );
+
+  it('malformed request body (HttpException 400) → VALIDATION_ERROR with details.fields', () => {
+    const { status, body } = run(
+      new BadRequestException('Unexpected end of JSON input'),
+    );
+    expect(status).toBe(400);
+    expect(body).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Unexpected end of JSON input',
+        details: { fields: [] },
+      },
+    });
   });
 
   it('HttpException 404 → NOT_FOUND envelope', () => {

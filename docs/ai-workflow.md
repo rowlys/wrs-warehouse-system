@@ -159,13 +159,14 @@ Filled in during implementation. One row per meaningful prompt or correction.
 | 1 | docs | P1 | First drafts of all `/docs` files and `CLAUDE.md` | (fill in: edits you made to the drafts) |
 | 2 | docs | P2 | | |
 | 3 | docs | P7: resolve Q-01 (close short) and Q-02 (receipt reversal) | PRD v1.1 (FR-35–37, BR-17–19, US-08/09, A-13–15), spec §6.1/§6.2/§7 + DDL, OpenAPI 1.1.0, ERD/state/data-flow diagrams, tasks T026–T028, test catalogue | Agent asked two gaps before writing: close short with nothing short → 422 `NOTHING_SHORT`; reversal leaving nothing received → back to `OPEN`. Agent also found T014 described "two lines of the same product" in one document, which BR-06 forbids; fixed to two documents |
-| 4 | | | | |
+| 4 | T016 | P5: `spec-reviewer` over the whole backend (T001–T015, T026, T027) | Table of every FR/BR/AC and openapi operation: 2 GAP, 1 NOT TESTED, rest OK | (1) GAP BR-09: concurrent identical receipt for the whole remaining quantity → 422 instead of 200 replay (and 422 instead of 409 for the same key with another quantity); reproduced 5/5. Fixed by taking the document lock before the key lookup; two race tests added to `idempotency.spec.ts`. (2) GAP §4.2: malformed JSON body → `VALIDATION_ERROR` without `details.fields`; filter now adds `fields: []`, unit test added. (3) NOT TESTED §4.3 `receipt_reversals.receipt_id` P2002 → 409: unit test added (mapping was already right). Re-review of the fixes: no GAP; it flagged two paths the reorder left untested (replay on a `COMPLETED` document; the step 15 P2002 retry, now only reached when one key races on two documents), both now tested. Disabling the retry makes the new test fail |
 
 ### AI mistakes caught
 
 | Task | Mistake | How it was caught | Fix |
 |---|---|---|---|
-| | | | |
+| T012/T013 | Idempotency key looked up before the document lock (as spec §6 orders steps 5 → 6), so a duplicate that raced the first request saw "0 remaining" and got 422; the concurrent test only received 10 of 100, so it never hit this path | Repo audit, then confirmed by the `spec-reviewer` in T016 with a throwaway probe | Lock first, then look up the key; tests now race the full remaining quantity |
+| T016 | Contract test first asserted 21 operations; spec §4.1 and openapi have 20 | The test itself failed on first run | Count corrected to 20 |
 
 ## 8. Decisions made during implementation
 
@@ -193,6 +194,9 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-27 | T011 | Both 409 status errors (`INVALID_STATUS_TRANSITION`, `INVALID_DOCUMENT_STATUS`) carry `details: {currentStatus, action}` | OpenAPI shows these details for `INVALID_STATUS_TRANSITION`; using the same shape for both keeps one rule in `assertCan` and gives the UI the current status either way |
 | 2026-10-27 | T013 | An idempotent replay returns the original `receipt`, but `item`, `document` and `inventory` show the current state | The schema stores no response snapshot (spec §3.2); the receipt itself is immutable, so it is the "original result". Tested: a replay after the line was filled shows received 100 |
 | 2026-10-27 | T016 | Swagger UI is `swagger-ui-express`, pointed at the raw `docs/openapi.yaml` (served at `/api/docs/openapi.yaml`); `@nestjs/swagger` is not used | Spec §0 serves the hand-written contract; Swagger UI parses the YAML itself, so no decorators, generated spec or YAML parser are needed. The file is resolved as `<backend>/../docs/openapi.yaml`, so the T023 image must put it there |
+| 2026-10-27 | T016 | Receipt transaction takes the document lock (§6 step 6) before the idempotency lookup (step 5); the step 15 P2002 retry stays for the same key on another document's line | BR-09 must hold for concurrent duplicates: under READ COMMITTED the lookup after the lock sees a receipt the first request just committed. Replays now wait for the document lock, which is held only for one short transaction. A replay sent with an unknown `documentId` now gets 404 (the §6 step 6 failure) instead of a 200 replay |
+| 2026-10-27 | T016 | An HttpException that maps to `VALIDATION_ERROR` (malformed JSON, 413) gets `details: { fields: [] }` | §4.2 says `VALIDATION_ERROR` details are `{ fields: [...] }`; a malformed body names no field, and the parser message stays in `message` |
+| 2026-10-27 | T016 | Contract test reads `paths:` of `openapi.yaml` with a two-level line parser instead of a YAML library; the "copy openapi.yaml into the image" part of T016 moves to T023 | No YAML library is in the specs (`js-yaml` is only a transitive dependency); no Dockerfile exists until T023, see the T016 Swagger row for the path the image must use |
 | 2026-10-27 | T015 | Transaction filters `from`/`to` accept any strict ISO 8601 value, so a plain date such as `2026-10-27` means UTC midnight; impossible dates (`2026-02-30`) are 400 | openapi says `date-time` but is silent on date-only input; accepting it is the simplest reading and the frontend date picker can send either |
 
 ## 9. References

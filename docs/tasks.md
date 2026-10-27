@@ -159,7 +159,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- reversal`
 - **Done when:** all pass; stock writes still only in `receipts.service.ts` and `products.service.ts`.
 
-### [ ] T016 API documentation and contract check
+### [x] T016 API documentation and contract check
 - **Refs:** technical-spec §0 (API docs), §4; openapi (all)
 - **Depends:** T005–T015, T026, T027
 - **Work:** serve `docs/openapi.yaml` with Swagger UI at `/api/docs` (copy the file into the image at build time). Run the `spec-reviewer` subagent over the whole backend and fix every GAP.

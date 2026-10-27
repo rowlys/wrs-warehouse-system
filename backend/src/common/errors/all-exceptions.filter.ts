@@ -88,7 +88,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const status = e.getStatus();
       // Other 4xx (e.g. 413) have no dedicated code; the request itself is unacceptable.
       const code = HTTP_CODES[status] ?? ErrorCode.VALIDATION_ERROR;
-      return { status, code, message: e.message };
+      // §4.2: VALIDATION_ERROR always has details.fields; a malformed body names no field.
+      const details =
+        code === ErrorCode.VALIDATION_ERROR ? { fields: [] } : undefined;
+      return { status, code, message: e.message, details };
     }
     if (isPrismaKnownError(e)) {
       if (e.code === 'P2025') {
