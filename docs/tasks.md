@@ -135,7 +135,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && for i in $(seq 10); do npm test -- concurrency || exit 1; done`
 - **Done when:** 10/10 runs green. Output is pasted into `docs/testing.md` as evidence.
 
-### [ ] T015 Inventory and transaction history
+### [x] T015 Inventory and transaction history
 - **Refs:** prd FR-40, FR-41, US-06; technical-spec §5; openapi `/inventory`, `/inventory/transactions`
 - **Depends:** T012
 - **Work:** balances list (sorted by SKU, search, pagination); transactions list (newest first by id, filters productId / receivingDocumentId / from / to, joins product, document number and user; bigint id as string).
