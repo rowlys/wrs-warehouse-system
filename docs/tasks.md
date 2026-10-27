@@ -143,7 +143,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- inventory`
 - **Done when:** shapes match openapi `InventoryBalance` / `InventoryTransaction`.
 
-### [ ] T026 Close short
+### [x] T026 Close short
 - **Refs:** prd FR-35, BR-11, BR-17, US-08, §9; technical-spec §3.2 (`receiving_documents`), §6.1 (Close short), §7, §8; openapi `/receiving-documents/{documentId}/close-short`, `ReasonRequest`, `ReceivingDocumentDetail`
 - **Depends:** T012
 - **Work:** `POST …/close-short` (SUPERVISOR), one transaction with document `FOR UPDATE`, using `document-state.ts`; records `closed_short_at`, `closed_short_by_id`, `close_short_reason`. No stock writes. Detail response includes `closedShortAt`, `closedShortBy`, `closeShortReason`.

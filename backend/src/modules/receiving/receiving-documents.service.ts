@@ -221,6 +221,36 @@ export class ReceivingDocumentsService {
     );
   }
 
+  /** FR-35, spec §6.1 "Close short": at least one line short (BR-11). No stock writes. */
+  closeShort(
+    documentId: string,
+    userId: string,
+    reason: string,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.transition(
+      documentId,
+      'CLOSE_SHORT',
+      async (tx) => {
+        const items = await tx.receivingItem.findMany({
+          where: { receivingDocumentId: documentId },
+          select: { expectedQuantity: true, receivedQuantity: true },
+        });
+        if (!items.some((i) => i.receivedQuantity < i.expectedQuantity)) {
+          throw new AppError(
+            ErrorCode.NOTHING_SHORT,
+            422,
+            'Every line is fully received; complete the document instead.',
+          );
+        }
+      },
+      {
+        closedShortAt: new Date(),
+        closedShortById: userId,
+        closeShortReason: reason,
+      },
+    );
+  }
+
   /** FR-29, spec §6.1 "Cancel": DRAFT or OPEN only (BR-15). */
   cancel(
     documentId: string,
@@ -240,7 +270,7 @@ export class ReceivingDocumentsService {
    */
   private transition(
     documentId: string,
-    action: 'OPEN' | 'COMPLETE' | 'CANCEL',
+    action: 'OPEN' | 'COMPLETE' | 'CLOSE_SHORT' | 'CANCEL',
     guard: (tx: Prisma.TransactionClient) => Promise<void>,
     data: Prisma.ReceivingDocumentUncheckedUpdateInput,
   ): Promise<ReceivingDocumentDetail> {

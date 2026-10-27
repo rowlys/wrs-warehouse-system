@@ -105,6 +105,17 @@ export class ReceivingDocumentsController {
   }
 
   @Roles(UserRole.SUPERVISOR)
+  @Post(':documentId/close-short')
+  @HttpCode(200)
+  closeShort(
+    @Param('documentId', uuidParam('documentId')) documentId: string,
+    @Body() body: ReasonRequest,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.documents.closeShort(documentId, user.id, body.reason);
+  }
+
+  @Roles(UserRole.SUPERVISOR)
   @Post(':documentId/cancel')
   @HttpCode(200)
   cancel(
