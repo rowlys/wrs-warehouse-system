@@ -179,7 +179,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd frontend && npm test && npm run build`; manual: log in as both seeded users with backend running.
 - **Done when:** login/logout works; protected pages redirect when logged out.
 
-### [ ] T018 Products page
+### [x] T018 Products page
 - **Refs:** prd FR-10, FR-11, US-02 (AC-02.5); openapi `/products`
 - **Depends:** T017, T007
 - **Work:** table (SKU, name, unit, on-hand, created), search box (debounced), pagination, "New product" modal for supervisors only, field errors from `details.fields` shown under inputs, 409 shown as a form error.

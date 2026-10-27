@@ -45,7 +45,7 @@ export function renderPage(
   const fetchMock = mockApi(routes)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[path]}>
           <AuthProvider>{ui}</AuthProvider>
