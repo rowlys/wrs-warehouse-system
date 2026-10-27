@@ -10,6 +10,7 @@ import { ErrorAlert } from '../components/ErrorAlert'
 import { ProductPicker, type ProductOption } from '../components/ProductPicker'
 import { QuantityInput } from '../components/QuantityInput'
 import { ReasonDialog } from '../components/ReasonDialog'
+import { ReceiveForm } from '../components/ReceiveForm'
 import { quantityError } from '../components/rules'
 import { StatusBadge } from '../components/StatusBadge'
 
@@ -120,7 +121,7 @@ export function DocumentDetailPage() {
             <Table.Th ta="right">Received</Table.Th>
             <Table.Th ta="right">Remaining</Table.Th>
             <Table.Th>Fully received</Table.Th>
-            {can.editLines && <Table.Th />}
+            {(can.editLines || can.receive) && <Table.Th />}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -143,6 +144,7 @@ export function DocumentDetailPage() {
               <Table.Td ta="right">{item.receivedQuantity}</Table.Td>
               <Table.Td ta="right">{item.remainingQuantity}</Table.Td>
               <Table.Td>{item.isFullyReceived ? '✓' : '—'}</Table.Td>
+              {can.receive && <Table.Td>{!item.isFullyReceived && <ReceiveForm documentId={id} item={item} />}</Table.Td>}
               {can.editLines && (
                 <Table.Td>
                   <Button

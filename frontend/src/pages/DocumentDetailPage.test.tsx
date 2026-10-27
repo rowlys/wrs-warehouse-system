@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { renderDetail } from '../test/detail'
-import { doc, DOC_ID } from '../test/fixtures'
+import { doc, DOC_ID, item } from '../test/fixtures'
 
 describe('DocumentDetailPage', () => {
   it('FR-23 shows header, lines with remaining, and the fully-received check', async () => {
@@ -10,6 +10,22 @@ describe('DocumentDetailPage', () => {
     expect(await screen.findByText('RCV-2026-000001')).toBeInTheDocument()
     expect(screen.getByText('FRZ-CHK-001')).toBeInTheDocument()
     expect(screen.getByText(/opened/i)).toHaveTextContent('Siti Supervisor')
+  })
+
+  it('AC-04.9 an operator gets a Receive form on each line that is not fully received', async () => {
+    renderDetail(
+      'OPERATOR',
+      doc({
+        status: 'IN_PROGRESS',
+        items: [
+          item(),
+          item({ id: '30000000-0000-0000-0000-000000000002', product: { id: 'p2', sku: 'FRZ-FSH-002', name: 'Tuna', unitOfMeasure: 'CTN' }, receivedQuantity: 100, remainingQuantity: 0, isFullyReceived: true }),
+        ],
+      }),
+    )
+    expect(await screen.findByRole('textbox', { name: 'Quantity to receive of FRZ-CHK-001' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Quantity to receive of FRZ-FSH-002' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^receive$/i })).toHaveLength(1)
   })
 
   it('FR-27 FR-29 a supervisor on a DRAFT sees Open and Cancel; an operator does not', async () => {

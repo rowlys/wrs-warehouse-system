@@ -5,6 +5,7 @@ import type {
   LoginResponse,
   Page,
   Product,
+  ReceiptResult,
   ReceivingDocumentDetail,
   ReceivingDocumentSummary,
   ReceivingStatus,
@@ -52,4 +53,12 @@ export const changeStatus = (id: string, action: 'open' | 'complete' | 'cancel' 
   api<ReceivingDocumentDetail>(`${doc(id)}/${action}`, {
     method: 'POST',
     body: reason === undefined ? undefined : { reason },
+  })
+
+/** FR-33: the same key on a retry returns the original receipt instead of receiving twice. */
+export const recordReceipt = (id: string, itemId: string, quantity: number, idempotencyKey: string) =>
+  api<ReceiptResult>(`${doc(id)}/items/${itemId}/receipts`, {
+    method: 'POST',
+    body: { quantity },
+    headers: { 'Idempotency-Key': idempotencyKey },
   })

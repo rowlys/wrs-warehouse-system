@@ -5,6 +5,7 @@ import { can } from './permissions'
 const ALLOWED = {
   EDIT_ITEMS: ['DRAFT'],
   OPEN: ['DRAFT'],
+  RECEIVE: ['OPEN', 'IN_PROGRESS'],
   COMPLETE: ['IN_PROGRESS'],
   CANCEL: ['DRAFT', 'OPEN'],
 } satisfies Record<string, ReceivingStatus[]>
@@ -21,5 +22,7 @@ export function documentActions(role: Role | undefined, doc: Pick<ReceivingDocum
     open: status && allows('OPEN', doc.status),
     complete: status && allows('COMPLETE', doc.status) && doc.allItemsReceived,
     cancel: status && allows('CANCEL', doc.status),
+    /** Per line, only while it is not fully received. */
+    receive: can(role, 'RECORD_RECEIPT') && allows('RECEIVE', doc.status),
   }
 }

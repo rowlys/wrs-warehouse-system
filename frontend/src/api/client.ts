@@ -34,16 +34,17 @@ interface Options {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   body?: unknown
   query?: Record<string, string | number | undefined>
+  headers?: Record<string, string>
 }
 
 /** Calls `/api/v1{path}` with the bearer token; throws ApiError on any non-2xx. */
-export async function api<T>(path: string, { method = 'GET', body, query }: Options = {}): Promise<T> {
+export async function api<T>(path: string, { method = 'GET', body, query, headers: extra }: Options = {}): Promise<T> {
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(query ?? {})) {
     if (v !== undefined && v !== '') params.set(k, String(v))
   }
   const qs = params.size ? `?${params}` : ''
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { ...extra }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'

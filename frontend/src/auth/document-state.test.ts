@@ -25,6 +25,13 @@ describe('documentActions', () => {
     expect(shown('SUPERVISOR', status, all)).toEqual(expected)
   })
 
+  it.each(['OPERATOR', 'SUPERVISOR'] as const)('FR-30 %s may receive only on OPEN and IN_PROGRESS', (role) => {
+    const receivable = (['DRAFT', 'OPEN', 'IN_PROGRESS', 'COMPLETED', 'CLOSED_SHORT', 'CANCELLED'] as const).filter(
+      (status) => documentActions(role, { status, allItemsReceived: false }).receive,
+    )
+    expect(receivable).toEqual(['OPEN', 'IN_PROGRESS'])
+  })
+
   it.each(SUPERVISOR)('FR-04 operator on %s (all received: %s) sees no document actions', (status, all) => {
     expect(shown('OPERATOR', status, all)).toEqual([])
   })
