@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { renderDetail } from '../test/detail'
-import { doc, DOC_ID, item } from '../test/fixtures'
+import { doc, DOC_ID, item, receipt } from '../test/fixtures'
 
 describe('DocumentDetailPage', () => {
   it('FR-23 shows header, lines with remaining, and the fully-received check', async () => {
@@ -80,5 +80,82 @@ describe('DocumentDetailPage', () => {
     expect(await screen.findByText('Cancelled')).toBeInTheDocument()
     const [, init] = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/cancel'))!
     expect(JSON.parse(String(init!.body))).toEqual({ reason: 'Supplier cancelled shipment' })
+  })
+
+  const reversed = receipt({
+    id: '40000000-0000-0000-0000-000000000002',
+    quantity: 60,
+    reversal: { id: 'rv1', reason: 'Typo, counted 10', reversedAt: '2026-10-27T11:00:00.000Z', reversedBy: { id: 'u2', fullName: 'Siti Supervisor' } },
+  })
+  const inProgress = doc({
+    status: 'IN_PROGRESS',
+    items: [item({ receivedQuantity: 40, remainingQuantity: 60 })],
+    receipts: [receipt(), reversed],
+  })
+
+  it('FR-36 BR-19 a supervisor gets Reverse only on receipts that are not reversed', async () => {
+    renderDetail('SUPERVISOR', inProgress)
+    expect(await screen.findAllByRole('button', { name: /^reverse$/i })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: /close short/i })).toBeInTheDocument()
+  })
+
+  it('FR-04 an operator gets neither Reverse nor Close short', async () => {
+    renderDetail('OPERATOR', inProgress)
+    await screen.findByText('RCV-2026-000001')
+    expect(screen.queryByRole('button', { name: /^reverse$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /close short/i })).not.toBeInTheDocument()
+  })
+
+  it('FR-23 a reversed receipt is struck through with reason, time and user', async () => {
+    renderDetail('OPERATOR', inProgress)
+    const row = (await screen.findByText(/Typo, counted 10/)).closest('tr')!
+    expect(row).toHaveTextContent('Siti Supervisor')
+    expect(within(row).getByText('60')).toHaveStyle({ textDecoration: 'line-through' })
+  })
+
+  it('AC-09.1 reversing sends the reason and shows the updated document', async () => {
+    const fetchMock = renderDetail('SUPERVISOR', doc({ status: 'IN_PROGRESS', items: [item({ receivedQuantity: 40, remainingQuantity: 60 })], receipts: [receipt()] }), {
+      [`POST /api/v1/receiving-documents/${DOC_ID}/receipts/${receipt().id}/reverse`]: () => ({
+        status: 200,
+        body: doc({ status: 'OPEN', receipts: [receipt({ reversal: reversed.reversal })] }),
+      }),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: /^reverse$/i }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText(/reason/i), 'Typo, counted 10')
+    await userEvent.click(within(dialog).getByRole('button', { name: /reverse receipt/i }))
+    expect(await screen.findByText(/Typo, counted 10/)).toBeInTheDocument()
+    const [, init] = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/reverse'))!
+    expect(JSON.parse(String(init!.body))).toEqual({ reason: 'Typo, counted 10' })
+  })
+
+  it('AC-08.1 a CLOSED_SHORT document labels the remaining column "Short" and shows the reason', async () => {
+    renderDetail(
+      'OPERATOR',
+      doc({
+        status: 'CLOSED_SHORT',
+        items: [item({ receivedQuantity: 70, remainingQuantity: 30 })],
+        closedShortAt: '2026-10-27T12:00:00.000Z',
+        closedShortBy: { id: 'u2', fullName: 'Siti Supervisor' },
+        closeShortReason: 'Supplier out of stock',
+      }),
+    )
+    expect(await screen.findByRole('columnheader', { name: 'Short' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Remaining' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Supplier out of stock/)).toHaveTextContent('Siti Supervisor')
+  })
+
+  it('AC-08.2 NFR-06 a failed close short shows the API message in the dialog', async () => {
+    renderDetail('SUPERVISOR', inProgress, {
+      [`POST /api/v1/receiving-documents/${DOC_ID}/close-short`]: () => ({
+        status: 422,
+        body: { error: { code: 'NOTHING_SHORT', message: 'Every line is fully received; complete the document instead.' } },
+      }),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: /close short/i }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText(/reason/i), 'Supplier out of stock')
+    await userEvent.click(within(dialog).getByRole('button', { name: /close short/i }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Every line is fully received; complete the document instead.')
   })
 })

@@ -2,8 +2,8 @@ import { Alert, Button, Center, Group, Loader, Modal, Paper, Stack, Table, Text,
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useParams } from 'react-router'
-import { addItem, changeStatus, getDocument, removeItem, updateItem } from '../api/endpoints'
-import type { ReceivingDocumentDetail, ReceivingItem, UserRef } from '../api/types'
+import { addItem, changeStatus, getDocument, removeItem, reverseReceipt, updateItem } from '../api/endpoints'
+import type { Receipt, ReceivingDocumentDetail, ReceivingItem, UserRef } from '../api/types'
 import { documentActions } from '../auth/document-state'
 import { useCurrentUser } from '../auth/useAuth'
 import { ErrorAlert } from '../components/ErrorAlert'
@@ -26,7 +26,7 @@ function Event({ label, at, by, reason }: { label: string; at: string | null; by
   )
 }
 
-type Dialog = 'complete' | 'cancel' | null
+type Dialog = { kind: 'complete' } | { kind: 'cancel' } | { kind: 'close-short' } | { kind: 'reverse'; receipt: Receipt } | null
 
 /** FR-23, FR-34: document header, lines and receipts, with the actions role and status allow. */
 export function DocumentDetailPage() {
@@ -42,7 +42,10 @@ export function DocumentDetailPage() {
     onSuccess: async (detail) => {
       if (detail) queryClient.setQueryData(['document', id], detail)
       else await queryClient.invalidateQueries({ queryKey: ['document', id] })
-      await queryClient.invalidateQueries({ queryKey: ['documents'] })
+      // A reversal changes stock; refreshing these after other actions is harmless.
+      await Promise.all(
+        [['documents'], ['inventory'], ['transactions']].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+      )
       setDialog(null)
     },
   })
@@ -63,6 +66,19 @@ export function DocumentDetailPage() {
   const doc = document.data
   const can = documentActions(user?.role, doc)
   const busy = action.isPending
+  // Cancel, close short and reverse share the reason dialog (BR-15, BR-17).
+  const reasonAction =
+    dialog?.kind === 'cancel'
+      ? { title: `Cancel ${doc.documentNumber}`, confirmLabel: 'Cancel document', run: (r: string) => changeStatus(id, 'cancel', r) }
+      : dialog?.kind === 'close-short'
+        ? { title: `Close ${doc.documentNumber} short`, confirmLabel: 'Close short', run: (r: string) => changeStatus(id, 'close-short', r) }
+        : dialog?.kind === 'reverse'
+          ? {
+              title: `Reverse receipt of ${dialog.receipt.quantity} × ${dialog.receipt.productSku}`,
+              confirmLabel: 'Reverse receipt',
+              run: (r: string) => reverseReceipt(id, dialog.receipt.id, r),
+            }
+          : null
 
   return (
     <Stack>
@@ -81,12 +97,17 @@ export function DocumentDetailPage() {
             </Button>
           )}
           {can.complete && (
-            <Button color="green" disabled={busy} onClick={() => setDialog('complete')}>
+            <Button color="green" disabled={busy} onClick={() => setDialog({ kind: 'complete' })}>
               Complete
             </Button>
           )}
+          {can.closeShort && (
+            <Button color="orange" variant="light" disabled={busy} onClick={() => setDialog({ kind: 'close-short' })}>
+              Close short
+            </Button>
+          )}
           {can.cancel && (
-            <Button color="red" variant="light" disabled={busy} onClick={() => setDialog('cancel')}>
+            <Button color="red" variant="light" disabled={busy} onClick={() => setDialog({ kind: 'cancel' })}>
               Cancel document
             </Button>
           )}
@@ -106,6 +127,7 @@ export function DocumentDetailPage() {
           <Event label="Created" at={doc.createdAt} by={doc.createdBy} />
           <Event label="Opened" at={doc.openedAt} by={doc.openedBy} />
           <Event label="Completed" at={doc.completedAt} by={doc.completedBy} />
+          <Event label="Closed short" at={doc.closedShortAt} by={doc.closedShortBy} reason={doc.closeShortReason} />
           <Event label="Cancelled" at={doc.cancelledAt} by={doc.cancelledBy} reason={doc.cancelReason} />
         </Stack>
       </Paper>
@@ -119,7 +141,7 @@ export function DocumentDetailPage() {
             <Table.Th>Unit</Table.Th>
             <Table.Th ta="right">Expected</Table.Th>
             <Table.Th ta="right">Received</Table.Th>
-            <Table.Th ta="right">Remaining</Table.Th>
+            <Table.Th ta="right">{doc.status === 'CLOSED_SHORT' ? 'Short' : 'Remaining'}</Table.Th>
             <Table.Th>Fully received</Table.Th>
             {(can.editLines || can.receive) && <Table.Th />}
           </Table.Tr>
@@ -184,6 +206,8 @@ export function DocumentDetailPage() {
               <Table.Th>SKU</Table.Th>
               <Table.Th ta="right">Quantity</Table.Th>
               <Table.Th>By</Table.Th>
+              <Table.Th>Reversal</Table.Th>
+              {can.reverse && <Table.Th />}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -191,15 +215,33 @@ export function DocumentDetailPage() {
               <Table.Tr key={r.id}>
                 <Table.Td>{when(r.receivedAt)}</Table.Td>
                 <Table.Td>{r.productSku}</Table.Td>
-                <Table.Td ta="right">{r.quantity}</Table.Td>
+                <Table.Td ta="right">
+                  <Text size="sm" td={r.reversal ? 'line-through' : undefined}>
+                    {r.quantity}
+                  </Text>
+                </Table.Td>
                 <Table.Td>{r.receivedBy.fullName}</Table.Td>
+                <Table.Td>
+                  {r.reversal && (
+                    <Event label="Reversed" at={r.reversal.reversedAt} by={r.reversal.reversedBy} reason={r.reversal.reason} />
+                  )}
+                </Table.Td>
+                {can.reverse && (
+                  <Table.Td>
+                    {!r.reversal && (
+                      <Button size="xs" color="red" variant="subtle" disabled={busy} onClick={() => setDialog({ kind: 'reverse', receipt: r })}>
+                        Reverse
+                      </Button>
+                    )}
+                  </Table.Td>
+                )}
               </Table.Tr>
             ))}
           </Table.Tbody>
         </Table>
       )}
 
-      <Modal opened={dialog === 'complete'} onClose={closeDialog} title={`Complete ${doc.documentNumber}?`}>
+      <Modal opened={dialog?.kind === 'complete'} onClose={closeDialog} title={`Complete ${doc.documentNumber}?`}>
         <Stack>
           <Text size="sm">Every line is fully received. Completing is final.</Text>
           <ErrorAlert error={action.error} />
@@ -213,14 +255,14 @@ export function DocumentDetailPage() {
           </Group>
         </Stack>
       </Modal>
-      {dialog === 'cancel' && (
+      {reasonAction && (
         <ReasonDialog
-          title={`Cancel ${doc.documentNumber}`}
-          confirmLabel="Cancel document"
+          title={reasonAction.title}
+          confirmLabel={reasonAction.confirmLabel}
           loading={busy}
           error={action.error}
           onClose={closeDialog}
-          onConfirm={(reason) => action.mutate(() => changeStatus(id, 'cancel', reason))}
+          onConfirm={(reason) => action.mutate(() => reasonAction.run(reason))}
         />
       )}
     </Stack>

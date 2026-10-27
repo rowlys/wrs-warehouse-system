@@ -62,3 +62,6 @@ export const recordReceipt = (id: string, itemId: string, quantity: number, idem
     body: { quantity },
     headers: { 'Idempotency-Key': idempotencyKey },
   })
+
+export const reverseReceipt = (id: string, receiptId: string, reason: string) =>
+  api<ReceivingDocumentDetail>(`${doc(id)}/receipts/${receiptId}/reverse`, { method: 'POST', body: { reason } })

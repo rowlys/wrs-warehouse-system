@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { ReceivingStatus, Role } from '../api/types'
 import { documentActions } from './document-state'
 
-type Shown = 'editLines' | 'open' | 'complete' | 'cancel'
+type Shown = 'editLines' | 'open' | 'complete' | 'closeShort' | 'cancel' | 'reverse'
 
-// Spec §7 ALLOWED × §8 roles, plus the complete guard (all lines fully received).
+// Spec §7 ALLOWED × §8 roles, plus the guards: complete needs every line received, close short one line short (BR-11).
 const SUPERVISOR: [ReceivingStatus, boolean, Shown[]][] = [
   ['DRAFT', false, ['editLines', 'open', 'cancel']],
   ['OPEN', false, ['cancel']],
-  ['IN_PROGRESS', false, []],
-  ['IN_PROGRESS', true, ['complete']],
+  ['IN_PROGRESS', false, ['closeShort', 'reverse']],
+  ['IN_PROGRESS', true, ['complete', 'reverse']],
   ['COMPLETED', true, []],
   ['CLOSED_SHORT', false, []],
   ['CANCELLED', false, []],
@@ -17,11 +17,11 @@ const SUPERVISOR: [ReceivingStatus, boolean, Shown[]][] = [
 
 const shown = (role: Role, status: ReceivingStatus, allItemsReceived: boolean) => {
   const a = documentActions(role, { status, allItemsReceived })
-  return (['editLines', 'open', 'complete', 'cancel'] as const).filter((k) => a[k])
+  return (['editLines', 'open', 'complete', 'closeShort', 'cancel', 'reverse'] as const).filter((k) => a[k])
 }
 
 describe('documentActions', () => {
-  it.each(SUPERVISOR)('FR-24–FR-29 supervisor on %s (all received: %s) sees %j', (status, all, expected) => {
+  it.each(SUPERVISOR)('FR-24–FR-29 FR-35 FR-36 supervisor on %s (all received: %s) sees %j', (status, all, expected) => {
     expect(shown('SUPERVISOR', status, all)).toEqual(expected)
   })
 
