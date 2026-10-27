@@ -151,7 +151,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `cd backend && npm test -- close-short`
 - **Done when:** all pass.
 
-### [ ] T027 Receipt reversal
+### [x] T027 Receipt reversal
 - **Refs:** prd FR-36, FR-37, BR-12, BR-13, BR-17–BR-19, US-09; technical-spec §3.2 (`receipt_reversals`, `inventory_transactions`), §4.3, §6.2 (all steps); openapi `…/receipts/{receiptId}/reverse`, `Receipt`, `ReceiptReversal`, `InventoryTransaction`
 - **Depends:** T014, T015
 - **Work:** `ReceiptsService.reverseReceipt` implementing spec §6.2 steps 4–15 in order, locks via `tx.$queryRaw` document → item, balance via `UPDATE … RETURNING`. Map P2002 on `receipt_reversals_receipt_id_key` → 409. Detail response shows `reversal` per receipt; transactions list returns `RECEIPT_REVERSAL` rows with `receiptReversalId`.

@@ -5,7 +5,11 @@ import { ErrorCode } from '../../common/errors/error-code';
 import { PrismaService } from '../../prisma/prisma.service';
 import { lockDocument } from './document-lock';
 import { assertCan, nextStatus } from './document-state';
-import { ReceiptResult } from './receiving-documents.dto';
+import {
+  ReceiptResult,
+  ReceivingDocumentDetail,
+} from './receiving-documents.dto';
+import { ReceivingDocumentsService } from './receiving-documents.service';
 import {
   allItemsReceived,
   ITEM_INCLUDE,
@@ -42,7 +46,10 @@ export interface RecordedReceipt {
  */
 @Injectable()
 export class ReceiptsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly documents: ReceivingDocumentsService,
+  ) {}
 
   /** Spec §6 steps 4–15. */
   async recordReceipt(
@@ -162,6 +169,108 @@ export class ReceiptsService {
       if (!replay) throw e;
       return { result: replay, replayed: true };
     }
+  }
+
+  /** Spec §6.2 steps 4–15 (FR-37). The original receipt and its ledger row are never changed. */
+  reverseReceipt(
+    documentId: string,
+    receiptId: string,
+    reason: string,
+    userId: string,
+  ): Promise<ReceivingDocumentDetail> {
+    // Step 4
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Steps 5–6 (BR-18)
+        assertCan('REVERSE', await lockDocument(tx, documentId));
+
+        // Step 7: only through the document the receipt belongs to (BR-18).
+        const receipt = await tx.receipt.findFirst({
+          where: {
+            id: receiptId,
+            receivingItem: { receivingDocumentId: documentId },
+          },
+          select: {
+            quantity: true,
+            receivingItemId: true,
+            reversal: { select: { id: true } },
+          },
+        });
+        if (!receipt) {
+          throw new AppError(
+            ErrorCode.NOT_FOUND,
+            404,
+            'Receipt not found on this receiving document',
+          );
+        }
+
+        // Step 8 (BR-19)
+        if (receipt.reversal) {
+          throw new AppError(
+            ErrorCode.RECEIPT_ALREADY_REVERSED,
+            409,
+            'This receipt has already been reversed.',
+          );
+        }
+
+        // Step 9
+        const [item] = await tx.$queryRaw<{ product_id: string }[]>`
+          SELECT product_id FROM receiving_items
+          WHERE id = ${receipt.receivingItemId}::uuid
+          FOR UPDATE`;
+
+        // Step 10: a racing duplicate hits receipt_reversals_receipt_id_key → 409.
+        const reversal = await tx.receiptReversal.create({
+          data: { receiptId, reason, reversedById: userId },
+        });
+
+        // Step 11
+        await tx.receivingItem.update({
+          where: { id: receipt.receivingItemId },
+          data: { receivedQuantity: { decrement: receipt.quantity } },
+        });
+
+        // Step 12: the UPDATE takes the balance row lock.
+        const [balance] = await tx.$queryRaw<{ quantity_on_hand: number }[]>`
+          UPDATE inventory_balances
+          SET quantity_on_hand = quantity_on_hand - ${receipt.quantity}, updated_at = now()
+          WHERE product_id = ${item.product_id}::uuid
+          RETURNING quantity_on_hand`;
+
+        // Step 13
+        await tx.inventoryTransaction.create({
+          data: {
+            productId: item.product_id,
+            type: 'RECEIPT_REVERSAL',
+            quantityChange: -receipt.quantity,
+            balanceAfter: balance.quantity_on_hand,
+            receiptReversalId: reversal.id,
+            receivingDocumentId: documentId,
+            createdById: userId,
+          },
+        });
+
+        // Step 14: nothing received any more → back to OPEN; opened_at/by unchanged.
+        const linesWithStock = await tx.receivingItem.count({
+          where: {
+            receivingDocumentId: documentId,
+            receivedQuantity: { gt: 0 },
+          },
+        });
+        if (!linesWithStock) {
+          await tx.receivingDocument.update({
+            where: { id: documentId },
+            data: { status: 'OPEN' },
+          });
+        }
+
+        return this.documents.loadDetail(tx, documentId);
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        timeout: 10_000,
+      },
+    );
   }
 
   /**
