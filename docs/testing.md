@@ -169,8 +169,46 @@ Tests:       4 passed, 4 total
 Control check: with `FOR UPDATE` removed from the document and line locks, the AC-04.8 test and the receipt-vs-cancel test fail (`2 failed, 2 passed`; the cancel race returned 500 from a CHECK violation). So these tests catch missing locks rather than passing by luck.
 
 ### 4.5 Clean-start deployment and health check (T023)
+Fresh stack (new named volume), configuration taken unchanged from `.env.example`:
+
 ```
-(paste `docker compose ps` and `curl localhost:8080/health` output)
+$ docker compose -p wrs-clean --env-file .env.example up --build -d --wait   # separate project = brand-new volume
+ Container wrs-clean-db-1  Healthy
+ Container wrs-clean-api-1  Healthy
+ Container wrs-clean-web-1  Healthy
+
+$ docker compose ps
+NAME              STATUS                    PORTS
+wrs-clean-api-1   Up 25 seconds (healthy)   3000/tcp
+wrs-clean-db-1    Up 30 seconds (healthy)   127.0.0.1:5432->5432/tcp
+wrs-clean-web-1   Up 19 seconds (healthy)   0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+
+$ curl -fsS localhost:8080/health
+{"status":"ok","database":"up"}
+
+$ docker compose logs api        # first start
+1 migration found in prisma/migrations
+Applying migration `20261026134838_init`
+All migrations have been successfully applied.
+Seeded 2 users and 5 products
+[NestApplication] Nest application successfully started
+
+$ docker compose restart api && curl -fsS localhost:8080/health
+{"status":"ok","database":"up"}
+
+$ docker compose logs api        # after restart: migrations and seed re-run safely (NFR-05)
+1 migration found in prisma/migrations
+No pending migrations to apply.
+Seeded 2 users and 5 products
+[NestApplication] Nest application successfully started
+
+$ curl -s -o /dev/null -w "%{http_code}\n" -d '{"username":"supervisor","password":"change-me"}' \
+    -H 'Content-Type: application/json' localhost:8080/api/v1/auth/login
+200
+$ curl -s -o /dev/null -w "%{http_code} %{content_type}\n" localhost:8080/receiving/abc   # SPA fallback
+200 text/html
+$ docker exec wrs-clean-api-1 whoami
+node
 ```
 
 ### 4.6 End-to-end run (T024)

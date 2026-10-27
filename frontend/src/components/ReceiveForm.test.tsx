@@ -49,7 +49,7 @@ describe('ReceiveForm', () => {
     const [first, retry] = keysSent(fetchMock)
     expect(first).toMatch(/^[A-Za-z0-9_-]{8,100}$/)
     expect(retry).toBe(first)
-    expect(JSON.parse(String((fetchMock.mock.calls.at(-1)![1] as RequestInit).body))).toEqual({ quantity: 10 })
+    expect(JSON.parse(String((fetchMock.mock.lastCall![1] as RequestInit).body))).toEqual({ quantity: 10 })
   })
 
   it('AC-04.9 a success clears the field, and the next receipt gets a new key', async () => {

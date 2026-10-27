@@ -231,7 +231,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 
 ## Phase 4 — Delivery
 
-### [ ] T023 Containerization and clean-start deployment
+### [x] T023 Containerization and clean-start deployment
 - **Refs:** technical-spec §10, §11; prd NFR-05, NFR-08
 - **Depends:** T016, T022
 - **Work:** `backend/Dockerfile` (multi-stage, non-root, entrypoint runs `prisma migrate deploy`, seed when `SEED_ON_START=true`, then the app); `frontend/Dockerfile` + `nginx.conf` (static files, SPA fallback, proxy `/api/` and `/health` to `api:3000`); full `docker-compose.yml` with `db`, `api`, `web`, healthchecks and `depends_on: condition: service_healthy`; `web` published, `db` on 127.0.0.1 only.
