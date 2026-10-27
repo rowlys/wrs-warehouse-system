@@ -171,7 +171,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 
 ## Phase 3 — Frontend
 
-### [ ] T017 Frontend foundation and login
+### [x] T017 Frontend foundation and login
 - **Refs:** prd FR-01, FR-04, FR-05, US-01, NFR-06; technical-spec §1.1, §1.3, §4.2
 - **Depends:** T006
 - **Work:** Mantine + TanStack Query + React Router setup; `api/client.ts` (relative `/api/v1`, bearer token, parses error envelope into an `ApiError` with code/message/details, on 401 clears token and redirects to `/login`); `AuthProvider`, `ProtectedRoute`, `useCurrentUser`, `can(role, action)` helper mirroring spec §8; app shell with nav (Receiving, Products, Inventory, Transactions), user name, role badge, logout; `LoginPage`; `ErrorAlert` component showing `message`.
