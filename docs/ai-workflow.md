@@ -206,6 +206,7 @@ Decisions the specs did not cover, recorded by the agent (per `CLAUDE.md`) or by
 | 2026-10-27 | T023 | `prisma` (CLI) moved from devDependencies to dependencies; `prisma/seed.ts` is compiled to `dist/prisma/seed.js` in the build stage | `migrate deploy` runs in the runtime image on every start (NFR-05), and the pruned runtime has no ts-node |
 | 2026-10-27 | T023 | Compose builds the api's `DATABASE_URL` from `POSTGRES_*` with host `db` and pins `PORT=3000`; `.env.example` now has `SEED_ON_START=true` (spec §10 example) | `.env`'s `DATABASE_URL` points at `127.0.0.1` for host-side dev (T009 row); nginx proxies to `api:3000`; a clean start from `.env.example` needs the demo users to exist. A `POSTGRES_PASSWORD` with URL-special characters would need encoding |
 | 2026-10-27 | T023 | `web` also gets a healthcheck (`wget` of `/` inside the container) | Spec §11 lists healthchecks for `db` and `api` only, but the T023 verify step expects every service healthy |
+| 2026-10-27 | T024 | The E2E creates two fresh products (unique SKUs per run) for the two lines; "partial then the rest" is 4 + 6 on line A, then 5 on line B, giving the 3 ledger rows. `playwright.config.ts` reads the demo passwords and `WEB_PORT` from the root `.env` (variables already set win) | Fresh products keep the inventory totals exact on every run against the same stack; reading `.env` keeps passwords out of the repo with no dotenv dependency (`process.loadEnvFile`) |
 
 ## 9. References
 

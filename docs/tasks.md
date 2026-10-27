@@ -239,7 +239,7 @@ Review gates (🔍) are points where the human reviews the diff, optionally runs
 - **Verify:** `docker compose down -v && docker compose up --build -d && docker compose ps` (all healthy) `&& curl -fsS localhost:8080/health && docker compose restart api && curl -fsS localhost:8080/health` (migrations re-run safely).
 - **Done when:** clean start works with only `.env` created from `.env.example`; output saved for testing.md.
 
-### [ ] T024 End-to-end test
+### [x] T024 End-to-end test
 - **Refs:** technical-spec §9; prd US-03, US-04, US-05, US-06
 - **Depends:** T023
 - **Work:** Playwright at repo root (`e2e/`), one spec: supervisor creates product and a document with 2 lines → opens it → logs out → operator receives a partial and then the rest → supervisor completes → inventory shows the totals and transactions show 3 rows. Also: operator does not see the "New product" button.

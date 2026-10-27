@@ -212,7 +212,22 @@ node
 ```
 
 ### 4.6 End-to-end run (T024)
-(screenshot or Playwright report link)
+`e2e/receiving.spec.ts` (Playwright, Chromium) against the Compose stack via nginx on `localhost:8080`. Fresh volume, then two consecutive runs; each run creates its own uniquely named products, so it can repeat on the same stack.
+
+```
+$ docker compose -p wrs-clean --env-file .env.example down -v && docker compose -p wrs-clean --env-file .env.example up -d --wait
+$ for i in 1 2; do npm run test:e2e; done
+=== run 1
+  ✓  1 [chromium] › e2eeceiving.spec.ts:45:5 › T-E2E-01 US-03–US-06 supervisor plans, operator receives, supervisor completes, stock and ledger agree (4.0s)
+  ✓  2 [chromium] › e2eeceiving.spec.ts:100:5 › T-E2E-02 AC-02.5 operator does not see the "New product" button (363ms)
+  2 passed (5.4s)
+=== run 2
+  ✓  1 [chromium] › e2eeceiving.spec.ts:45:5 › T-E2E-01 US-03–US-06 supervisor plans, operator receives, supervisor completes, stock and ledger agree (3.7s)
+  ✓  2 [chromium] › e2eeceiving.spec.ts:100:5 › T-E2E-02 AC-02.5 operator does not see the "New product" button (351ms)
+  2 passed (5.2s)
+```
+
+![Playwright HTML report](evidence/e2e-report.png)
 
 ### 4.7 Manual checklist (T-MAN-01)
 - [ ] Operator sees no create/open/complete/cancel buttons
